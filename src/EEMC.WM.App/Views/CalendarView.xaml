@@ -1,0 +1,214 @@
+<UserControl x:Class="EEMC.WM.App.Views.CalendarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:EEMC.WM.App.ViewModels"
+             xmlns:inf="clr-namespace:EEMC.WM.App.Infrastructure">
+    <UserControl.Resources>
+        <!-- Mục công việc trên lịch (kéo thả được) -->
+        <DataTemplate x:Key="EntryChip" DataType="{x:Type vm:CalendarEntry}">
+            <Border Background="{Binding Color, Converter={StaticResource SemSoft}}" CornerRadius="4" Padding="6,3" Margin="0,0,0,3"
+                    BorderBrush="{Binding Color, Converter={StaticResource Sem}}" BorderThickness="3,0,0,0"
+                    ToolTip="{Binding Tooltip}" Cursor="Hand"
+                    MouseLeftButtonDown="OnChipMouseDown" MouseMove="OnChipMouseMove"
+                    inf:DoubleClick.Command="{Binding Item.EditCommand}">
+                <TextBlock TextTrimming="CharacterEllipsis" FontSize="12">
+                    <Run Text="{Binding TimeText, Mode=OneWay}" FontWeight="SemiBold"/>
+                    <Run Text="{Binding Item.Title, Mode=OneWay}"/>
+                </TextBlock>
+            </Border>
+        </DataTemplate>
+
+        <Style x:Key="DayCell" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Bg.Card}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border.Default}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="AllowDrop" Value="True"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsWorkDay}" Value="False">
+                    <Setter Property="Background" Value="{DynamicResource Bg.Subtle}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource Sem.BlueSoft}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsOtherMonth}" Value="True">
+                    <Setter Property="Opacity" Value="0.55"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,12">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <RadioButton Style="{StaticResource ChipRadio}" GroupName="calmode" Content="Ngày" Command="{Binding SetModeCommand}" CommandParameter="Day"
+                             IsChecked="{Binding IsDay, Mode=OneWay}"/>
+                <RadioButton Style="{StaticResource ChipRadio}" GroupName="calmode" Content="Tuần" Command="{Binding SetModeCommand}" CommandParameter="Week"
+                             IsChecked="{Binding IsWeek, Mode=OneWay}"/>
+                <RadioButton Style="{StaticResource ChipRadio}" GroupName="calmode" Content="Tháng" Command="{Binding SetModeCommand}" CommandParameter="Month"
+                             IsChecked="{Binding IsMonth, Mode=OneWay}"/>
+            </StackPanel>
+            <TextBlock Text="Lịch làm việc" Style="{StaticResource H1}"/>
+        </DockPanel>
+
+        <DockPanel Grid.Row="1" Margin="0,0,0,10">
+            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                       Text="Kéo thả công việc sang ngày khác để đổi hạn hoặc đặt ngày thực hiện • Nhấp đúp để mở • Màu: đỏ quá hạn, cam ưu tiên cao, xanh lá hoàn thành"/>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="‹" Command="{Binding PrevCommand}" Width="36"/>
+                <Button Content="Hôm nay" Command="{Binding TodayCommand}" Margin="6,0"/>
+                <Button Content="›" Command="{Binding NextCommand}" Width="36"/>
+                <TextBlock Text="{Binding RangeText}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="14,0,0,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ========== Tuần ========== -->
+        <Border Grid.Row="2" BorderBrush="{DynamicResource Border.Default}" BorderThickness="1,1,0,0"
+                Visibility="{Binding IsWeek, Converter={StaticResource BoolVis}}">
+            <ItemsControl ItemsSource="{Binding Days}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:CalendarDay}">
+                        <Border Style="{StaticResource DayCell}" Drop="OnDayDrop" DragOver="OnDayDragOver">
+                            <DockPanel>
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <Button DockPanel.Dock="Right" Content="＋" Style="{StaticResource GhostButton}" Padding="4,0" MinHeight="20"
+                                            Command="{Binding DataContext.AddOnDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                            ToolTip="Thêm công việc có hạn ngày này"/>
+                                    <Button Style="{StaticResource GhostButton}" Padding="0" HorizontalAlignment="Left"
+                                            Command="{Binding DataContext.OpenDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding LoadText}" Style="{StaticResource Muted}" FontSize="11"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DockPanel>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Visible}" ItemTemplate="{StaticResource EntryChip}"/>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+
+        <!-- ========== Tháng ========== -->
+        <Grid Grid.Row="2" Visibility="{Binding IsMonth, Converter={StaticResource BoolVis}}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <UniformGrid Columns="7" Margin="0,0,0,4">
+                <TextBlock Text="Thứ Hai" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Thứ Ba" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Thứ Tư" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Thứ Năm" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Thứ Sáu" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Thứ Bảy" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Chủ Nhật" Style="{StaticResource Muted}" HorizontalAlignment="Center"/>
+            </UniformGrid>
+            <Border Grid.Row="1" BorderBrush="{DynamicResource Border.Default}" BorderThickness="1,1,0,0">
+                <ItemsControl ItemsSource="{Binding Days}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><UniformGrid Columns="7" Rows="6"/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:CalendarDay}">
+                            <Border Style="{StaticResource DayCell}" Drop="OnDayDrop" DragOver="OnDayDragOver">
+                                <DockPanel>
+                                    <DockPanel DockPanel.Dock="Top">
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding LoadText}" Style="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/>
+                                        <Button Content="{Binding DayNumber}" Style="{StaticResource GhostButton}" Padding="2,0" MinHeight="18" HorizontalAlignment="Left" FontWeight="SemiBold"
+                                                Command="{Binding DataContext.OpenDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                                ToolTip="Xem lịch ngày"/>
+                                    </DockPanel>
+                                    <TextBlock DockPanel.Dock="Bottom" Text="{Binding MoreText}" FontSize="11" Foreground="{DynamicResource Accent}"
+                                               Visibility="{Binding MoreText, Converter={StaticResource BoolVis}}"/>
+                                    <ItemsControl ItemsSource="{Binding Visible}" ItemTemplate="{StaticResource EntryChip}"/>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Border>
+        </Grid>
+
+        <!-- ========== Ngày ========== -->
+        <Grid Grid.Row="2" Visibility="{Binding IsDay, Converter={StaticResource BoolVis}}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Lịch đề xuất trong ngày" Style="{StaticResource H2}"/>
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" Margin="0,0,0,8"
+                               Text="Đây là lịch ĐỀ XUẤT dựa trên giờ làm việc, mức ưu tiên và thời lượng. Bấm Chấp thuận để ghi thời gian bắt đầu theo kế hoạch. Khối 'ước tính' dùng thời lượng mặc định."/>
+                    <TextBlock DockPanel.Dock="Top" Text="Không có khối công việc đề xuất cho ngày này (ngày đã qua, ngày nghỉ hoặc không còn việc cần xếp)." Style="{StaticResource Muted}"
+                               Visibility="{Binding DayBlocks.Count, Converter={StaticResource BoolVisInv}}"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding DayBlocks}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:ScheduleBlockItem}">
+                                    <Border BorderBrush="{DynamicResource Border.Default}" BorderThickness="0,0,0,1" Padding="0,8">
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Left" Width="110">
+                                                <TextBlock Text="{Binding TimeText}" FontWeight="SemiBold"/>
+                                                <TextBlock Text="{Binding DurationText}" Style="{StaticResource Muted}" FontSize="11"/>
+                                            </StackPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Content="Chấp thuận" Style="{StaticResource SmallButton}" Command="{Binding ApplyCommand}" Margin="0,0,4,0"
+                                                        Visibility="{Binding IsApplied, Converter={StaticResource BoolVisInv}}"/>
+                                                <Button Content="Mở" Style="{StaticResource SmallButton}" Command="{Binding Item.EditCommand}"/>
+                                            </StackPanel>
+                                            <StackPanel Margin="0,0,8,0">
+                                                <TextBlock Text="{Binding Item.Title}" TextWrapping="Wrap"/>
+                                                <TextBlock FontSize="11">
+                                                    <Run Text="{Binding KindText, Mode=OneWay}" Foreground="{DynamicResource Accent}"/>
+                                                    <Run Text=" • Hạn "/>
+                                                    <Run Text="{Binding Item.DueText, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Hạn, lịch cố định và kế hoạch trong ngày" Style="{StaticResource H2}"/>
+                    <TextBlock DockPanel.Dock="Top" Text="Không có công việc." Style="{StaticResource Muted}"
+                               Visibility="{Binding DayEntries.Count, Converter={StaticResource BoolVisInv}}"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding DayEntries}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:CalendarEntry}">
+                                    <DockPanel Margin="0,0,0,8">
+                                        <StackPanel DockPanel.Dock="Left" Width="80">
+                                            <TextBlock Text="{Binding TimeText}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Kind}" Style="{StaticResource Muted}" FontSize="11"/>
+                                        </StackPanel>
+                                        <ContentPresenter Content="{Binding Item}" ContentTemplate="{StaticResource TaskLine}"/>
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

@@ -1,0 +1,228 @@
+<Window x:Class="EEMC.WM.App.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:EEMC.WM.App.ViewModels"
+        xmlns:v="clr-namespace:EEMC.WM.App.Views"
+        Title="EEMC KHCN Work Manager – Trợ lý quản lý công việc KH&amp;CN và ĐMST"
+        Width="1440" Height="900" MinWidth="1100" MinHeight="680" WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource Bg.App}" Foreground="{DynamicResource Fg.Primary}"
+        FontFamily="{StaticResource AppFont}" FontSize="13">
+    <Window.InputBindings>
+        <KeyBinding Key="N" Modifiers="Control" Command="{Binding AddTaskCommand}"/>
+        <KeyBinding Key="F1" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Dashboard}"/>
+        <KeyBinding Key="D1" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Dashboard}"/>
+        <KeyBinding Key="D2" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Today}"/>
+        <KeyBinding Key="D3" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Tasks}"/>
+        <KeyBinding Key="D4" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Calendar}"/>
+        <KeyBinding Key="D6" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Documents}"/>
+        <KeyBinding Key="D8" Modifiers="Control" Command="{Binding GoCommand}" CommandParameter="{x:Static vm:PageKey.Settings}"/>
+    </Window.InputBindings>
+
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}"><v:DashboardView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:TodayViewModel}"><v:TodayView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:TaskListViewModel}"><v:TaskListView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CalendarViewModel}"><v:CalendarView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DocumentsViewModel}"><v:DocumentsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><v:SettingsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PlannedFeatureViewModel}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="24" MaxWidth="820" HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding Title}" Style="{StaticResource H1}"/>
+                    <Border Style="{StaticResource Card}" Margin="0,16,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Thuộc Giai đoạn 2 – chưa có trong phiên bản này" FontWeight="SemiBold" Foreground="{DynamicResource Sem.Orange}"/>
+                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,8,0,12"/>
+                            <TextBlock Text="Phạm vi dự kiến:" FontWeight="SemiBold"/>
+                            <ItemsControl ItemsSource="{Binding Features}" Margin="0,4,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding StringFormat=• {0}}" TextWrapping="Wrap" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="264"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ================= Thanh menu trái ================= -->
+        <Border Background="{DynamicResource Bg.Sidebar}" BorderBrush="{DynamicResource Border.Default}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <!-- Nhận diện -->
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="20,22,16,22">
+                    <Border Width="40" Height="40" CornerRadius="10">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#1565C0" Offset="0"/>
+                                <GradientStop Color="#0F3D6E" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <TextBlock Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="20" Foreground="#FFB74D"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <StackPanel Margin="12,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="EEMC Work Manager" FontFamily="{StaticResource DisplayFont}" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Fg.Primary}"/>
+                        <TextBlock Text="Thư ký KH&amp;CN và ĐMST" FontSize="11.5" Foreground="{DynamicResource Fg.Secondary}"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Chân: đồng bộ + đơn vị -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="10,8,10,14">
+                    <Button Style="{StaticResource GhostButton}" HorizontalContentAlignment="Left" Padding="12,8"
+                            Command="{Binding SyncNowCommand}" ToolTip="{Binding SyncTooltip}"
+                            Visibility="{Binding SyncVisible, Converter={StaticResource BoolVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding SyncGlyph}" FontFamily="{StaticResource IconFont}" FontSize="15"
+                                       Foreground="{Binding SyncColor, Converter={StaticResource Sem}}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding SyncText}" Margin="10,0,0,0" FontSize="12.5" Foreground="{DynamicResource Fg.Secondary}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <TextBlock Text="Tổng công ty Thiết bị điện Đông Anh – CTCP" FontSize="10.5" Foreground="{DynamicResource Fg.Tertiary}"
+                               TextWrapping="Wrap" Margin="12,8,8,0"/>
+                </StackPanel>
+
+                <StackPanel>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Tổng quan" Tag="&#xE80F;" ToolTip="Ctrl+1"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Dashboard}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Công việc hôm nay" Tag="&#xE823;" ToolTip="Ctrl+2"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Today}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Tất cả công việc" Tag="&#xE8FD;" ToolTip="Ctrl+3"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Tasks}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Lịch làm việc" Tag="&#xE787;" ToolTip="Ctrl+4"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Calendar}"/>
+                    <TextBlock Text="QUẢN LÝ" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Fg.Tertiary}" Margin="24,16,0,6"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Dự án KH&amp;CN" Tag="&#xE8F1;" ToolTip="Giai đoạn 2"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Projects}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Hồ sơ tài liệu" Tag="&#xE8B7;" ToolTip="Ctrl+6"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Documents}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Báo cáo" Tag="&#xE9F9;" ToolTip="Giai đoạn 2"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Reports}"/>
+                    <RadioButton Style="{StaticResource NavButton}" GroupName="nav" Content="Cài đặt" Tag="&#xE713;" ToolTip="Ctrl+8"
+                                 IsChecked="{Binding SelectedPage, Converter={StaticResource Eq}, ConverterParameter=Settings}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ================= Nội dung ================= -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- Thanh trên -->
+            <Border Background="{DynamicResource Bg.Header}" Padding="28,14,24,6">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,14,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding ClockText}" FontFamily="{StaticResource DisplayFont}" FontSize="17" FontWeight="SemiBold" HorizontalAlignment="Right"/>
+                            <TextBlock Text="{Binding DateText}" Style="{StaticResource Muted}" HorizontalAlignment="Right"/>
+                        </StackPanel>
+                        <Button x:Name="BellButton" Style="{StaticResource IconButton}" Width="40" Height="40" Command="{Binding ToggleNotificationsCommand}"
+                                ToolTip="Trung tâm thông báo">
+                            <Grid>
+                                <TextBlock Text="&#xEA8F;" FontFamily="{StaticResource IconFont}" FontSize="18"/>
+                                <Border Background="{DynamicResource Sem.Red}" CornerRadius="8" MinWidth="16" Height="16" Padding="4,0"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-8,-12,0"
+                                        Visibility="{Binding UnreadCount, Converter={StaticResource BoolVis}}">
+                                    <TextBlock Text="{Binding UnreadCount}" FontFamily="{StaticResource AppFont}" FontSize="10" Foreground="White"
+                                               FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                            </Grid>
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Grid Width="440">
+                            <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="36,8,10,8"
+                                     ToolTip="Tìm theo nội dung, mã, dự án, số văn bản, người giao, ghi chú (Ctrl+F) — không cần gõ dấu">
+                                <TextBox.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}"/>
+                                </TextBox.InputBindings>
+                            </TextBox>
+                            <TextBlock Text="&#xE721;" FontFamily="{StaticResource IconFont}" FontSize="14" Margin="13,0,0,0" VerticalAlignment="Center"
+                                       IsHitTestVisible="False" Foreground="{DynamicResource Fg.Secondary}"/>
+                            <TextBlock Text="Tìm công việc, dự án, số văn bản...   Ctrl+F" Margin="37,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                       Foreground="{DynamicResource Fg.Tertiary}"
+                                       Visibility="{Binding SearchText, Converter={StaticResource BoolVisInv}}"/>
+                        </Grid>
+                        <Button Content="Thêm công việc" Tag="&#xE710;" Style="{StaticResource PrimaryToolButton}" Margin="12,0,0,0" Padding="16,8"
+                                Command="{Binding AddTaskCommand}" ToolTip="Ctrl+N"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <ContentControl Grid.Row="1" Content="{Binding CurrentPage}" Focusable="False"/>
+
+            <!-- Trung tâm thông báo -->
+            <Popup IsOpen="{Binding IsNotificationsOpen}" StaysOpen="False" PlacementTarget="{Binding ElementName=BellButton}"
+                   Placement="Bottom" HorizontalOffset="-410" AllowsTransparency="True" PopupAnimation="Fade">
+                <Border Width="460" MaxHeight="620" Background="{DynamicResource Bg.Popup}" BorderBrush="{DynamicResource Border.Default}"
+                        BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,6,10,10">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25"/>
+                    </Border.Effect>
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                            <Button DockPanel.Dock="Right" Content="Đánh dấu tất cả đã đọc" Style="{StaticResource SmallButton}" Command="{Binding MarkAllReadCommand}"/>
+                            <TextBlock Text="Thông báo nhắc việc" Style="{StaticResource H2}" Margin="0"/>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Chưa có thông báo." Style="{StaticResource Muted}" Margin="0,8"
+                                   Visibility="{Binding Notifications.Count, Converter={StaticResource BoolVisInv}}"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Notifications}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:NotificationItemViewModel}">
+                                        <Border BorderBrush="{DynamicResource Border.Default}" BorderThickness="0,0,0,1" Padding="0,8">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRead}" Value="True">
+                                                            <Setter Property="Opacity" Value="0.6"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <DockPanel>
+                                                <Border DockPanel.Dock="Left" Width="4" CornerRadius="2" Margin="0,0,10,0"
+                                                        Background="{Binding Color, Converter={StaticResource Sem}}"/>
+                                                <StackPanel>
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" Style="{StaticResource Muted}" FontSize="11"/>
+                                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                    </DockPanel>
+                                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,6"/>
+                                                    <WrapPanel>
+                                                        <Button Content="Mở công việc" Style="{StaticResource SmallButton}" Margin="0,0,4,0" Command="{Binding OpenCommand}"
+                                                                Visibility="{Binding HasTask, Converter={StaticResource BoolVis}}"/>
+                                                        <Button Content="Hoãn 15 phút" Style="{StaticResource SmallButton}" Margin="0,0,4,0" Command="{Binding SnoozeCommand}" CommandParameter="15"
+                                                                Visibility="{Binding HasTask, Converter={StaticResource BoolVis}}"/>
+                                                        <Button Content="Hoãn 1 giờ" Style="{StaticResource SmallButton}" Margin="0,0,4,0" Command="{Binding SnoozeCommand}" CommandParameter="60"
+                                                                Visibility="{Binding HasTask, Converter={StaticResource BoolVis}}"/>
+                                                        <Button Content="Đến ngày mai" Style="{StaticResource SmallButton}" Margin="0,0,4,0" Command="{Binding SnoozeCommand}" CommandParameter="tomorrow"
+                                                                Visibility="{Binding HasTask, Converter={StaticResource BoolVis}}"/>
+                                                        <Button Content="Đã đọc" Style="{StaticResource SmallButton}" Command="{Binding MarkReadCommand}"
+                                                                Visibility="{Binding IsRead, Converter={StaticResource BoolVisInv}}"/>
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Popup>
+        </Grid>
+    </Grid>
+</Window>

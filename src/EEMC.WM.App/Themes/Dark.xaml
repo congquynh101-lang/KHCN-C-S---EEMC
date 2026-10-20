@@ -1,0 +1,44 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Bảng màu tối – phong cách Windows 11 Fluent -->
+    <Color x:Key="C.App">#1C1C1E</Color>
+    <Color x:Key="C.Accent">#60A5E8</Color>
+    <Color x:Key="C.Shadow">#66000000</Color>
+
+    <SolidColorBrush x:Key="Bg.App" Color="#1C1C1E"/>
+    <SolidColorBrush x:Key="Bg.Sidebar" Color="#202124"/>
+    <SolidColorBrush x:Key="Bg.Header" Color="#1C1C1E"/>
+    <SolidColorBrush x:Key="Bg.Card" Color="#2A2B2E"/>
+    <SolidColorBrush x:Key="Bg.Hover" Color="#34363A"/>
+    <SolidColorBrush x:Key="Bg.Pressed" Color="#3C3E43"/>
+    <SolidColorBrush x:Key="Bg.Input" Color="#2F3034"/>
+    <SolidColorBrush x:Key="Bg.Subtle" Color="#26272A"/>
+    <SolidColorBrush x:Key="Bg.Selected" Color="#1F3A57"/>
+    <SolidColorBrush x:Key="Bg.Popup" Color="#2C2D31"/>
+    <SolidColorBrush x:Key="Fg.Primary" Color="#ECEEF1"/>
+    <SolidColorBrush x:Key="Fg.Secondary" Color="#A7AFBA"/>
+    <SolidColorBrush x:Key="Fg.Tertiary" Color="#7E8691"/>
+    <SolidColorBrush x:Key="Fg.OnAccent" Color="#0B1B2B"/>
+    <SolidColorBrush x:Key="Border.Default" Color="#3A3C41"/>
+    <SolidColorBrush x:Key="Border.Strong" Color="#4A4D53"/>
+    <SolidColorBrush x:Key="Accent" Color="#60A5E8"/>
+    <SolidColorBrush x:Key="Accent.Hover" Color="#7DB7EE"/>
+    <SolidColorBrush x:Key="Accent.Soft" Color="#1F3A57"/>
+    <SolidColorBrush x:Key="Sidebar.Fg" Color="#C9CED6"/>
+    <SolidColorBrush x:Key="Sidebar.Selected" Color="#2F3135"/>
+    <SolidColorBrush x:Key="Sidebar.Hover" Color="#2A2C30"/>
+    <SolidColorBrush x:Key="Brand" Color="#9CC8F2"/>
+
+    <SolidColorBrush x:Key="Sem.Red" Color="#FF99A4"/>
+    <SolidColorBrush x:Key="Sem.Orange" Color="#FCB26B"/>
+    <SolidColorBrush x:Key="Sem.Blue" Color="#7CB8F0"/>
+    <SolidColorBrush x:Key="Sem.Gray" Color="#A9B1BC"/>
+    <SolidColorBrush x:Key="Sem.Green" Color="#6CCB5F"/>
+    <SolidColorBrush x:Key="Sem.Purple" Color="#C9A6F2"/>
+    <SolidColorBrush x:Key="Sem.RedSoft" Color="#442528"/>
+    <SolidColorBrush x:Key="Sem.OrangeSoft" Color="#45321F"/>
+    <SolidColorBrush x:Key="Sem.BlueSoft" Color="#1F3550"/>
+    <SolidColorBrush x:Key="Sem.GraySoft" Color="#33363B"/>
+    <SolidColorBrush x:Key="Sem.GreenSoft" Color="#1F3A22"/>
+    <SolidColorBrush x:Key="Sem.PurpleSoft" Color="#372A48"/>
+</ResourceDictionary>

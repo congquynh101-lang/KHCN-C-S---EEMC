@@ -1,0 +1,119 @@
+<UserControl x:Class="EEMC.WM.App.Views.TodayView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:EEMC.WM.App.ViewModels">
+    <Grid Margin="24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,14">
+            <Button DockPanel.Dock="Right" Content="＋ Thêm việc hạn hôm nay" Command="{Binding AddTaskCommand}"/>
+            <StackPanel>
+                <TextBlock Text="Công việc hôm nay" Style="{StaticResource H1}"/>
+                <TextBlock Text="{Binding DateText}" Style="{StaticResource Muted}" FontSize="13"/>
+            </StackPanel>
+        </DockPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="2*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Thứ tự xử lý đề xuất -->
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                        <CheckBox DockPanel.Dock="Right" Content="Hiện toàn bộ việc đang xử lý" IsChecked="{Binding ShowAllDirect}"/>
+                        <TextBlock Text="Thứ tự xử lý đề xuất" Style="{StaticResource H2}" Margin="0"/>
+                    </DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" Margin="0,0,0,10"
+                               Text="Sắp xếp theo ma trận Eisenhower kết hợp thời hạn thực tế, thời lượng dự kiến và lịch cố định. Mức ưu tiên do bạn đặt không bị thay đổi; lý do được giải thích dưới mỗi công việc. Công việc chờ đơn vị khác được tách sang cột bên phải."/>
+                    <TextBlock DockPanel.Dock="Top" Text="Không có công việc cần xử lý trong thời gian tới." Style="{StaticResource Muted}"
+                               Visibility="{Binding Ranked.Count, Converter={StaticResource BoolVisInv}}"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Ranked}" ItemTemplate="{StaticResource TaskCard}" VirtualizingPanel.IsVirtualizing="True"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="3*"/>
+                    <RowDefinition Height="12"/>
+                    <RowDefinition Height="2*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Lịch đề xuất hôm nay -->
+                <Border Style="{StaticResource Card}">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Content="Chấp thuận cả lịch" Style="{StaticResource SmallButton}" Command="{Binding ApplyAllCommand}"
+                                    ToolTip="Ghi thời gian bắt đầu theo kế hoạch cho các công việc trong lịch đề xuất hôm nay"/>
+                            <TextBlock Text="Lịch đề xuất hôm nay" Style="{StaticResource H2}" Margin="0"/>
+                        </DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding ScheduleSummary}" Style="{StaticResource Muted}" Margin="0,4,0,8"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <ItemsControl ItemsSource="{Binding Blocks}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:ScheduleBlockItem}">
+                                            <Border BorderBrush="{DynamicResource Border.Default}" BorderThickness="0,0,0,1" Padding="0,7">
+                                                <DockPanel>
+                                                    <StackPanel DockPanel.Dock="Left" Width="96">
+                                                        <TextBlock Text="{Binding TimeText}" FontWeight="SemiBold"/>
+                                                        <TextBlock Text="{Binding DurationText}" Style="{StaticResource Muted}" FontSize="11"/>
+                                                    </StackPanel>
+                                                    <Button DockPanel.Dock="Right" Content="Chấp thuận" Style="{StaticResource SmallButton}" VerticalAlignment="Center"
+                                                            Command="{Binding ApplyCommand}" Visibility="{Binding IsApplied, Converter={StaticResource BoolVisInv}}"
+                                                            ToolTip="Đặt thời gian bắt đầu theo kế hoạch = thời điểm đề xuất"/>
+                                                    <StackPanel Margin="0,0,8,0">
+                                                        <TextBlock Text="{Binding Item.Title}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="38"/>
+                                                        <TextBlock FontSize="11">
+                                                            <Run Text="{Binding KindText, Mode=OneWay}" Foreground="{DynamicResource Accent}"/>
+                                                            <Run Text="  "/>
+                                                            <Run Text="{Binding Item.RemainingText, Mode=OneWay}" Foreground="{Binding Item.DueColor, Converter={StaticResource Sem}}"/>
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock Text="Cảnh báo thời gian" FontWeight="SemiBold" Margin="0,12,0,4"
+                                           Visibility="{Binding Warnings.Count, Converter={StaticResource BoolVis}}"/>
+                                <ItemsControl ItemsSource="{Binding Warnings}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:WarningItem}">
+                                            <Border Background="{Binding Color, Converter={StaticResource SemSoft}}" CornerRadius="5" Padding="8,6" Margin="0,0,0,6">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Item.Title}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="12"/>
+                                                    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" FontSize="12" Foreground="{Binding Color, Converter={StaticResource Sem}}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+
+                <!-- Chờ phản hồi -->
+                <Border Grid.Row="2" Style="{StaticResource Card}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Chờ phối hợp / phản hồi / phê duyệt — cần đôn đốc" Style="{StaticResource H2}"/>
+                        <TextBlock DockPanel.Dock="Top" Text="Không có công việc đang chờ." Style="{StaticResource Muted}"
+                                   Visibility="{Binding Waiting.Count, Converter={StaticResource BoolVisInv}}"/>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding Waiting}" ItemTemplate="{StaticResource TaskLine}"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

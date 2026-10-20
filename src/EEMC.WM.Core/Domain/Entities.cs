@@ -1,0 +1,312 @@
+namespace EEMC.WM.Core.Domain;
+
+/// <summary>Thực thể được đồng bộ giữa các máy.</summary>
+public interface ISyncEntity
+{
+    /// <summary>Định danh toàn cục (32 ký tự hex), giống nhau trên mọi máy.</summary>
+    string SyncId { get; set; }
+    /// <summary>Thời điểm thay đổi gần nhất (UTC ticks) để quyết định bản nào mới hơn.</summary>
+    long SyncStamp { get; set; }
+    /// <summary>Có thay đổi trên máy này chưa gửi đi.</summary>
+    bool SyncDirty { get; set; }
+}
+
+public static class SyncIds
+{
+    public static string New() => Guid.NewGuid().ToString("N");
+
+    /// <summary>Định danh cố định suy ra từ nội dung (dùng cho danh mục mặc định để các máy trùng nhau).</summary>
+    public static string Deterministic(string key)
+    {
+        var hash = System.Security.Cryptography.MD5.HashData(System.Text.Encoding.UTF8.GetBytes(key));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+}
+
+public class WorkTask : ISyncEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Mã công việc duy nhất, tự sinh: CV-yyyy-nnnnn.</summary>
+    public string Code { get; set; } = "";
+
+    // ---- 4 trường bắt buộc ----
+    public DateTime ReceivedAt { get; set; }
+    public DateTime DueAt { get; set; }
+    public string Title { get; set; } = "";
+    public TaskPriority Priority { get; set; } = TaskPriority.Normal;
+
+    public WorkTaskStatus Status { get; set; } = WorkTaskStatus.NotStarted;
+
+    // ---- Thông tin mở rộng (không bắt buộc) ----
+    public int? CategoryId { get; set; }
+    public Category? Category { get; set; }
+    public string? ProjectName { get; set; }
+    public string? AssignedBy { get; set; }
+    public string? Assignee { get; set; }
+    public string? Coordinator { get; set; }
+    /// <summary>Thời lượng dự kiến (giờ làm việc). Null = chưa ước tính.</summary>
+    public double? EstimatedHours { get; set; }
+    public DateTime? PlannedStart { get; set; }
+    /// <summary>Công việc có thời điểm thực hiện cố định (họp, làm việc với đoàn...).</summary>
+    public bool IsFixedTime { get; set; }
+    public int Progress { get; set; }
+    public string? Deliverable { get; set; }
+    public DocumentStatus DocumentStatus { get; set; } = DocumentStatus.None;
+    public string? DocumentNumber { get; set; }
+    public string? LeaderOpinionNeeded { get; set; }
+    public string? Notes { get; set; }
+    public string? FolderPath { get; set; }
+    /// <summary>Ngày dự kiến nhận phản hồi (với công việc chờ phản hồi/phối hợp/phê duyệt).</summary>
+    public DateTime? ExpectedResponseAt { get; set; }
+
+    public int? ParentId { get; set; }
+    public WorkTask? Parent { get; set; }
+    /// <summary>Trọng số khi tính tiến độ của công việc cha (mặc định 1).</summary>
+    public double Weight { get; set; } = 1;
+    /// <summary>Dự án KH&amp;CN liên quan (Giai đoạn 2). ProjectName vẫn giữ để tương thích dữ liệu cũ.</summary>
+    public int? ProjectId { get; set; }
+    public Project? Project { get; set; }
+
+    // ---- Hệ thống ----
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    /// <summary>Thời điểm đóng công việc (hoàn thành hoặc hủy).</summary>
+    public DateTime? ClosedAt { get; set; }
+    /// <summary>Chuỗi chuẩn hóa (không dấu, chữ thường) phục vụ tìm kiếm.</summary>
+    public string SearchText { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    /// <summary>Tạm hoãn nhắc việc đến thời điểm này (chỉ trên máy này, không đồng bộ).</summary>
+    public DateTime? SnoozeUntil { get; set; }
+
+    // ---- Đồng bộ ----
+    public string SyncId { get; set; } = SyncIds.New();
+    public long SyncStamp { get; set; }
+    public bool SyncDirty { get; set; }
+    /// <summary>Máy đã tạo công việc (dùng khi xử lý trùng mã).</summary>
+    public string? OriginDevice { get; set; }
+
+    // ---- Thông tin tính toán (không lưu CSDL) ----
+    /// <summary>Id các công việc phải hoàn thành trước công việc này.</summary>
+    public List<int> DependsOnIds { get; set; } = new();
+    /// <summary>Mã các công việc phụ thuộc CHƯA hoàn thành (công việc này đang bị chặn).</summary>
+    public List<string> BlockedBy { get; set; } = new();
+    public bool IsBlocked => BlockedBy.Count > 0;
+
+    public void RefreshSearchText()
+    {
+        SearchText = Text.TextNormalizer.Normalize(string.Join(" ",
+            Code, Title, ProjectName, AssignedBy, Assignee, Coordinator, Deliverable, DocumentNumber, Notes, LeaderOpinionNeeded));
+    }
+
+    public WorkTask CloneForCopy()
+    {
+        return new WorkTask
+        {
+            Title = Title,
+            Priority = Priority,
+            DueAt = DueAt,
+            ReceivedAt = ReceivedAt,
+            CategoryId = CategoryId,
+            ProjectName = ProjectName,
+            AssignedBy = AssignedBy,
+            Assignee = Assignee,
+            Coordinator = Coordinator,
+            EstimatedHours = EstimatedHours,
+            IsFixedTime = IsFixedTime,
+            Deliverable = Deliverable,
+            LeaderOpinionNeeded = LeaderOpinionNeeded,
+            Notes = Notes,
+            FolderPath = FolderPath,
+            ProjectId = ProjectId,
+            ParentId = ParentId,
+            Weight = Weight,
+        };
+    }
+}
+
+/// <summary>Danh mục nghiệp vụ hai cấp: Nhóm (ParentId = null) và Mục con.</summary>
+public class Category : ISyncEntity
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int? ParentId { get; set; }
+    public Category? Parent { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public string SyncId { get; set; } = SyncIds.New();
+    public long SyncStamp { get; set; }
+    public bool SyncDirty { get; set; }
+
+    public string DisplayName => Parent == null ? Name : $"{Parent.Name} › {Name}";
+}
+
+/// <summary>Lịch sử thay đổi và lịch sử trao đổi, xử lý của công việc.</summary>
+public class TaskHistory : ISyncEntity
+{
+    public int Id { get; set; }
+    public int TaskId { get; set; }
+    public DateTime At { get; set; }
+    /// <summary>Tạo mới, Cập nhật, Đổi trạng thái, Trao đổi, Xóa, Khôi phục...</summary>
+    public string Action { get; set; } = "";
+    public string Detail { get; set; } = "";
+    public bool IsComment { get; set; }
+    public string SyncId { get; set; } = SyncIds.New();
+    public long SyncStamp { get; set; }
+    public bool SyncDirty { get; set; }
+}
+
+public class AppNotification
+{
+    public int Id { get; set; }
+    public int? TaskId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string Title { get; set; } = "";
+    public string Message { get; set; } = "";
+    public NotificationSeverity Severity { get; set; }
+    public bool IsRead { get; set; }
+}
+
+/// <summary>Ghi nhận các mốc nhắc việc đã phát để không gửi trùng.</summary>
+public class ReminderLog
+{
+    public int Id { get; set; }
+    public int TaskId { get; set; }
+    public string ReminderKey { get; set; } = "";
+    public DateTime FiredAt { get; set; }
+}
+
+public class AppSetting
+{
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+}
+
+/// <summary>Bộ đếm sinh mã theo năm.</summary>
+public class CodeCounter
+{
+    public int Year { get; set; }
+    public int LastNumber { get; set; }
+}
+
+// ============================ GIAI ĐOẠN 2 ============================
+
+public enum ProjectStatus
+{
+    Proposed = 1,     // Đề xuất
+    Preparing = 2,    // Đang chuẩn bị hồ sơ
+    InProgress = 3,   // Đang thực hiện
+    Acceptance = 4,   // Nghiệm thu
+    Settlement = 5,   // Thanh quyết toán
+    Completed = 6,    // Hoàn thành
+    Suspended = 7     // Tạm dừng
+}
+
+/// <summary>Đề tài/dự án KH&amp;CN.</summary>
+public class Project
+{
+    public int Id { get; set; }
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    /// <summary>Cấp quản lý: Nhà nước, Bộ, Tập đoàn, Tổng công ty, Cơ sở...</summary>
+    public string? ManagementLevel { get; set; }
+    public string? LeadUnit { get; set; }
+    public string? Leader { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public ProjectStatus Status { get; set; } = ProjectStatus.Proposed;
+    public string? Description { get; set; }
+    /// <summary>Các vấn đề tồn đọng.</summary>
+    public string? Issues { get; set; }
+    /// <summary>Những quyết định cần xin ý kiến.</summary>
+    public string? DecisionsNeeded { get; set; }
+    public string? FolderPath { get; set; }
+    public bool IsArchived { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public List<Milestone> Milestones { get; set; } = new();
+}
+
+/// <summary>Mốc quan trọng của dự án.</summary>
+public class Milestone
+{
+    public int Id { get; set; }
+    public int ProjectId { get; set; }
+    public string Name { get; set; } = "";
+    public DateTime? DueDate { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string? Notes { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public enum AttachmentKind
+{
+    Other = 0, Word = 1, Excel = 2, Pdf = 3, Folder = 4, Link = 5,
+    Minutes = 6,      // Biên bản họp
+    Decision = 7,     // Quyết định
+    Proposal = 8,     // Tờ trình
+    Report = 9        // Báo cáo
+}
+
+/// <summary>Hồ sơ, tài liệu gắn với công việc hoặc dự án: tệp tải lên máy chủ hoặc đường dẫn/liên kết.</summary>
+public class Attachment
+{
+    public int Id { get; set; }
+    public int? TaskId { get; set; }
+    public int? ProjectId { get; set; }
+    public string Name { get; set; } = "";
+    public AttachmentKind Kind { get; set; }
+    /// <summary>Đường dẫn mạng nội bộ, thư mục hoặc URL (khi không tải tệp lên).</summary>
+    public string? Link { get; set; }
+    /// <summary>Tên tệp lưu trên máy chủ (khi tải tệp lên).</summary>
+    public string? StoredFile { get; set; }
+    public long SizeBytes { get; set; }
+    public string? DocumentNumber { get; set; }
+    public DocumentStatus DocumentStatus { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Công việc <see cref="TaskId"/> chỉ bắt đầu được sau khi <see cref="DependsOnTaskId"/> hoàn thành.</summary>
+public class TaskDependency
+{
+    public int Id { get; set; }
+    public int TaskId { get; set; }
+    public int DependsOnTaskId { get; set; }
+}
+
+/// <summary>Tài khoản đăng nhập bản web.</summary>
+public class AppUser
+{
+    public int Id { get; set; }
+    public string UserName { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+    public bool IsAdmin { get; set; }
+    public int FailedLogins { get; set; }
+    public DateTime? LockedUntil { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime? LastLoginAt { get; set; }
+}
+
+/// <summary>Dấu vết xóa vĩnh viễn để các máy khác cũng xóa.</summary>
+public class SyncTombstone
+{
+    public int Id { get; set; }
+    /// <summary>"task" hoặc "category".</summary>
+    public string Kind { get; set; } = "";
+    public string SyncId { get; set; } = "";
+    public long SyncStamp { get; set; }
+    public bool SyncDirty { get; set; }
+}
+
+/// <summary>Tệp thay đổi cuối cùng đã nhận từ từng máy khác.</summary>
+public class SyncSourceState
+{
+    public string DeviceId { get; set; } = "";
+    public string LastFile { get; set; } = "";
+    public string? DeviceName { get; set; }
+    public DateTime LastImportUtc { get; set; }
+}

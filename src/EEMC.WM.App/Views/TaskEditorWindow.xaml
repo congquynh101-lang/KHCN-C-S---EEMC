@@ -1,0 +1,212 @@
+<Window x:Class="EEMC.WM.App.Views.TaskEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:EEMC.WM.App.Controls"
+        xmlns:inf="clr-namespace:EEMC.WM.App.Infrastructure"
+        Title="{Binding Header}" Width="1040" Height="760" MinWidth="720" MinHeight="520"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="{DynamicResource Bg.App}" Foreground="{DynamicResource Fg.Primary}"
+        FontFamily="{StaticResource AppFont}" FontSize="13">
+    <Window.Resources>
+        <inf:BoolToVisibilityConverter x:Key="BoolVis"/>
+        <inf:BoolToVisibilityConverter x:Key="BoolVisInv" Invert="True"/>
+        <inf:EqualsConverter x:Key="Eq"/>
+    </Window.Resources>
+    <Window.InputBindings>
+        <KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SaveCommand}"/>
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveCommand}"/>
+        <KeyBinding Key="Escape" Command="{Binding CancelCommand}"/>
+    </Window.InputBindings>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="{Binding Header}" Style="{StaticResource H1}"/>
+            <TextBlock Text="{Binding Code}" Margin="12,0,0,0" VerticalAlignment="Bottom" Style="{StaticResource Muted}" FontSize="14"/>
+        </StackPanel>
+
+        <!-- ================= Biểu mẫu ================= -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,12,0">
+                <Border Style="{StaticResource Card}">
+                    <StackPanel>
+                        <TextBlock Text="THÔNG TIN BẮT BUỘC" Style="{StaticResource Muted}" FontWeight="SemiBold"/>
+
+                        <TextBlock Text="Nội dung công việc *" Style="{StaticResource FieldLabel}"/>
+                        <TextBox x:Name="TitleBox" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True"
+                                 TextWrapping="Wrap" MinHeight="58" MaxHeight="140" VerticalScrollBarVisibility="Auto" FontSize="14"/>
+
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Bây giờ" Style="{StaticResource GhostButton}" FontSize="12"
+                                            Command="{Binding ReceivedNowCommand}" Margin="0,4,0,0"/>
+                                    <TextBlock Text="Ngày giờ nhận *" Style="{StaticResource FieldLabel}"/>
+                                </DockPanel>
+                                <c:DateTimeInput Value="{Binding ReceivedAt}" DefaultTime="08:00:00"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding RemainingText}" Style="{StaticResource Muted}" Margin="0,8,0,0"/>
+                                    <TextBlock Text="Hạn hoàn thành *" Style="{StaticResource FieldLabel}"/>
+                                </DockPanel>
+                                <c:DateTimeInput Value="{Binding DueAt}" DefaultTime="17:00:00"/>
+                                <WrapPanel Margin="0,6,0,0">
+                                    <Button Content="Hôm nay" Style="{StaticResource SmallButton}" Margin="0,0,4,4" Command="{Binding SetDueCommand}" CommandParameter="today"/>
+                                    <Button Content="Ngày mai" Style="{StaticResource SmallButton}" Margin="0,0,4,4" Command="{Binding SetDueCommand}" CommandParameter="tomorrow"/>
+                                    <Button Content="+3 ngày LV" Style="{StaticResource SmallButton}" Margin="0,0,4,4" Command="{Binding SetDueCommand}" CommandParameter="3d"/>
+                                    <Button Content="Thứ Sáu này" Style="{StaticResource SmallButton}" Margin="0,0,4,4" Command="{Binding SetDueCommand}" CommandParameter="friday"/>
+                                    <Button Content="Thứ Sáu tuần sau" Style="{StaticResource SmallButton}" Margin="0,0,4,4" Command="{Binding SetDueCommand}" CommandParameter="nextweek"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Text="Mức độ ưu tiên *" Style="{StaticResource FieldLabel}"/>
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Style="{StaticResource ChipRadio}" GroupName="prio" Content="Khẩn cấp"
+                                         IsChecked="{Binding Priority, Converter={StaticResource Eq}, ConverterParameter=Urgent}"/>
+                            <RadioButton Style="{StaticResource ChipRadio}" GroupName="prio" Content="Cao"
+                                         IsChecked="{Binding Priority, Converter={StaticResource Eq}, ConverterParameter=High}"/>
+                            <RadioButton Style="{StaticResource ChipRadio}" GroupName="prio" Content="Bình thường"
+                                         IsChecked="{Binding Priority, Converter={StaticResource Eq}, ConverterParameter=Normal}"/>
+                            <RadioButton Style="{StaticResource ChipRadio}" GroupName="prio" Content="Thấp"
+                                         IsChecked="{Binding Priority, Converter={StaticResource Eq}, ConverterParameter=Low}"/>
+                        </StackPanel>
+
+                        <Border Margin="0,12,0,0" Padding="10,8" CornerRadius="6" Background="{DynamicResource Bg.Subtle}"
+                                Visibility="{Binding AssessmentText, Converter={StaticResource BoolVis}}">
+                            <StackPanel>
+                                <TextBlock Text="Đánh giá tự động" FontWeight="SemiBold" FontSize="12"/>
+                                <TextBlock Text="{Binding AssessmentText}" Style="{StaticResource Muted}"/>
+                                <TextBlock Text="{Binding SuggestionText}" Foreground="{DynamicResource Sem.Orange}" FontSize="12" TextWrapping="Wrap"
+                                           Visibility="{Binding SuggestionText, Converter={StaticResource BoolVis}}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <Expander Header="Thông tin mở rộng (không bắt buộc)" IsExpanded="{Binding ShowExtended}" Margin="0,12,0,0" FontWeight="SemiBold">
+                    <Border Style="{StaticResource Card}" Margin="0,8,0,0">
+                        <Grid TextElement.FontWeight="Normal">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="16"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Trạng thái" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox ItemsSource="{Binding Statuses}" SelectedValuePath="Status" SelectedValue="{Binding Status}" DisplayMemberPath="Label"/>
+                                <TextBlock Text="Nhóm công việc" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox ItemsSource="{Binding Categories}" SelectedItem="{Binding Category}">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Display}">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsGroup}" Value="True">
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <TextBlock Text="Tên đề tài/dự án liên quan" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding ProjectName}"/>
+                                <TextBlock Text="Người giao việc" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding AssignedBy}"/>
+                                <TextBlock Text="Người thực hiện" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding Assignee}"/>
+                                <TextBlock Text="Đơn vị phối hợp" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding Coordinator}"/>
+                                <StackPanel Visibility="{Binding IsWaitingStatus, Converter={StaticResource BoolVis}}">
+                                    <TextBlock Text="Ngày dự kiến nhận phản hồi (để nhắc đôn đốc)" Style="{StaticResource FieldLabel}"/>
+                                    <c:DateTimeInput Value="{Binding ExpectedResponseAt}" DefaultTime="09:00:00"/>
+                                </StackPanel>
+                                <TextBlock Text="Kết quả cần bàn giao" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding Deliverable}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44"/>
+                                <TextBlock Text="Nội dung cần xin ý kiến lãnh đạo" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding LeaderOpinionNeeded}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Thời lượng dự kiến (giờ làm việc)" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding EstimatedHoursText, UpdateSourceTrigger=PropertyChanged}" ToolTip="Ví dụ: 2 hoặc 1,5. Để trống = chưa ước tính (hệ thống chỉ dùng ước tính mặc định để gợi ý)."/>
+                                <TextBlock Text="Thời gian bắt đầu theo kế hoạch" Style="{StaticResource FieldLabel}"/>
+                                <c:DateTimeInput Value="{Binding PlannedStart}" DefaultTime="08:00:00"/>
+                                <CheckBox Content="Có thời điểm thực hiện cố định (họp, làm việc với đoàn...)" IsChecked="{Binding IsFixedTime}" Margin="0,8,0,0"/>
+                                <TextBlock Text="{Binding Progress, StringFormat=Tiến độ hoàn thành: {0}%}" Style="{StaticResource FieldLabel}"/>
+                                <Slider Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding Progress}"/>
+                                <TextBlock Text="Tiến độ 100% không tự động chuyển sang Hoàn thành." Style="{StaticResource Muted}"/>
+                                <TextBlock Text="Tình trạng hồ sơ" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox ItemsSource="{Binding DocumentStatuses}" SelectedItem="{Binding DocumentStatus}" DisplayMemberPath="Label"/>
+                                <TextBlock Text="Số văn bản liên quan" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding DocumentNumber}"/>
+                                <TextBlock Text="Đường dẫn thư mục hồ sơ / tệp / đường dẫn mạng" Style="{StaticResource FieldLabel}"/>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="Mở" Margin="4,0,0,0" Command="{Binding OpenFolderCommand}"/>
+                                    <Button DockPanel.Dock="Right" Content="Chọn..." Margin="4,0,0,0" Command="{Binding BrowseFolderCommand}"/>
+                                    <TextBox Text="{Binding FolderPath}"/>
+                                </DockPanel>
+                                <TextBlock Text="Ghi chú" Style="{StaticResource FieldLabel}"/>
+                                <TextBox Text="{Binding Notes}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Expander>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ================= Lịch sử (chỉ khi sửa) ================= -->
+        <Border Grid.Row="1" Grid.Column="1" Width="330" Style="{StaticResource Card}"
+                Visibility="{Binding IsNew, Converter={StaticResource BoolVisInv}}">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Lịch sử trao đổi, xử lý" Style="{StaticResource H2}"/>
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                    <TextBox Text="{Binding NewComment, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="50"
+                             ToolTip="Ghi nội dung trao đổi, kết quả xử lý, ý kiến chỉ đạo..."/>
+                    <Button Content="Thêm ghi nhận" Margin="0,6,0,0" HorizontalAlignment="Right" Command="{Binding AddCommentCommand}"/>
+                </StackPanel>
+                <ListBox ItemsSource="{Binding History}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,4,0,8">
+                                <TextBlock>
+                                    <Run Text="{Binding AtText, Mode=OneWay}" Foreground="{DynamicResource Fg.Secondary}" FontSize="11"/>
+                                    <Run Text="  "/>
+                                    <Run Text="{Binding Action, Mode=OneWay}" FontWeight="SemiBold" FontSize="12"/>
+                                </TextBlock>
+                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" MaxWidth="290"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <!-- ================= Nút ================= -->
+        <DockPanel Grid.Row="2" Grid.ColumnSpan="2" Margin="0,12,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="Hủy (Esc)" Command="{Binding CancelCommand}" Margin="0,0,8,0" MinWidth="90"/>
+                <Button Content="Lưu công việc (Ctrl+Enter)" Style="{StaticResource PrimaryButton}" Command="{Binding SaveCommand}" MinWidth="200"/>
+            </StackPanel>
+            <TextBlock Text="{Binding ErrorText}" Foreground="{DynamicResource Sem.Red}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+        </DockPanel>
+    </Grid>
+</Window>

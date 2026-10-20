@@ -1,0 +1,22 @@
+﻿<Application x:Class="EEMC.WM.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:inf="clr-namespace:EEMC.WM.App.Infrastructure"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Vị trí 0: bộ màu (ThemeManager thay thế khi đổi sáng/tối) -->
+                <ResourceDictionary Source="Themes/Light.xaml"/>
+                <ResourceDictionary Source="Themes/Styles.xaml"/>
+                <ResourceDictionary Source="Themes/Templates.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <inf:SemanticBrushConverter x:Key="Sem"/>
+            <inf:SemanticBrushConverter x:Key="SemSoft" Suffix="Soft"/>
+            <inf:BoolToVisibilityConverter x:Key="BoolVis"/>
+            <inf:BoolToVisibilityConverter x:Key="BoolVisInv" Invert="True"/>
+            <inf:EqualsConverter x:Key="Eq"/>
+            <inf:BarWidthConverter x:Key="BarWidth"/>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>
