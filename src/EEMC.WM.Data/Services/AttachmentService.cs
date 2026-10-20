@@ -203,6 +203,8 @@ public sealed class AttachmentService
     /// <summary>Đường dẫn tuyệt đối của tệp đã lưu; null nếu đường dẫn nằm ngoài thư mục tệp (chặn truy cập trái phép).</summary>
     public string? ResolveStoredPath(string rel)
     {
+        // Coi cả "\" và "/" là dấu phân cách thư mục (dữ liệu tạo trên Windows vẫn dùng được trên máy chủ Linux)
+        rel = rel.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar);
         var root = Path.GetFullPath(FilesDir) + Path.DirectorySeparatorChar;
         var full = Path.GetFullPath(Path.Combine(FilesDir, rel));
         return full.StartsWith(root, StringComparison.OrdinalIgnoreCase) ? full : null;

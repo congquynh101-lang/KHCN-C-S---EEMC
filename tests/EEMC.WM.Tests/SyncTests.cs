@@ -325,7 +325,11 @@ public sealed class SyncTests : IAsyncLifetime
     {
         var a = await NewMachineAsync("A", T0);
         var s = a.Settings.CloneCurrent();
-        s.SyncFolder = "Z:\\khong-ton-tai\\" + new string('x', 5) + "\\<>|";
+        // Thư mục nằm "bên trong" một tệp thường: không tạo được trên cả Windows lẫn Linux
+        var blocker = Path.Combine(_root, "la-tep-thuong");
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(blocker, "x");
+        s.SyncFolder = Path.Combine(blocker, "DongBo");
         await a.Settings.SaveAsync(s);
         var r = await a.Sync.RunAsync();
         Assert.Equal(SyncState.Error, r.State);
