@@ -6,6 +6,8 @@ B=/volume1/eemc
 APP=$B/app
 export EEMC_WM_DATA=$B/data
 export ASPNETCORE_URLS=http://0.0.0.0:8088
+# Chạy sau Proxy ngược HTTPS của DSM: nhận địa chỉ và giao thức gốc từ X-Forwarded-For/Proto
+export ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
 export TZ=Asia/Ho_Chi_Minh
 # NAS ít RAM: dùng bộ thu gom rác chế độ máy trạm và giới hạn bộ nhớ
 export DOTNET_gcServer=0

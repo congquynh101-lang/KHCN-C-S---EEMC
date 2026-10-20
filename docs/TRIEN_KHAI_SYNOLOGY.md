@@ -92,7 +92,8 @@ Mật khẩu đăng nhập đi qua mạng; dùng HTTPS để mã hóa.
 ## 6. Bảo mật mạng
 
 - Chỉ dùng trong mạng nội bộ EEMC. **Không** mở cổng 8088/8443 ra Internet trên router.
-- Cần dùng từ xa: kết nối **VPN Server** của Synology (hoặc VPN công ty) rồi mở địa chỉ nội bộ như bình thường.
+- Cần dùng từ xa: dùng **Tailscale** (mục 12, chạy được cả khi nhà mạng dùng CGNAT) hoặc VPN Server của Synology,
+  rồi mở địa chỉ của NAS như trong mạng nội bộ.
 - **Bảng điều khiển** → **Bảo mật** → **Tường lửa**: cho phép cổng 8088/8443 chỉ với dải IP nội bộ.
 - Phần mềm tự khóa tài khoản 15 phút sau 5 lần nhập sai mật khẩu.
 
@@ -188,6 +189,7 @@ Tên tác vụ chỉ được dùng chữ không dấu, số và dấu cách.
 2. Chọn `EEMC Work Manager Web` → **Run**. Khoảng 30 giây sau mở `http://<IP-NAS>:8088` → tạo tài khoản quản trị (mục 4).
 
 Từ đây phần mềm tự chạy mỗi khi NAS khởi động. HTTPS: dùng Proxy ngược như mục 5 (đích `localhost:8088`).
+Truy cập từ mạng khác: xem mục 12.
 
 ### 11.4 Cập nhật bản mới
 
@@ -208,3 +210,62 @@ Bản trước được giữ ở `eemc/app.old`; dữ liệu trong `eemc/data` 
 - **Quên mật khẩu**: tạo tác vụ chạy tay với lệnh
   `cd /volume1/eemc/app && EEMC_WM_DATA=/volume1/eemc/data ./EEMC.WM.Web --reset-password <tên đăng nhập> <mật khẩu mới>`,
   Run một lần, rồi **xóa tác vụ đó** (vì mật khẩu nằm trong lệnh).
+- `start.sh` bật `ASPNETCORE_FORWARDEDHEADERS_ENABLED` để phần mềm nhận biết đang chạy sau Proxy ngược HTTPS.
+
+## 12. Truy cập từ mạng khác
+
+### 12.1 Kiểm tra trước: đường truyền có IP public không?
+
+Mở trang quản trị modem → **Status → WAN Information**, xem địa chỉ IPv4 của kết nối INTERNET, rồi so với
+**External Address** trong DSM (**Bảng điều khiển → Truy cập bên ngoài → DDNS**).
+
+- Hai địa chỉ **giống nhau**: có IP public, dùng được cả cách A và cách B.
+- Địa chỉ WAN của modem thuộc dải `10.x`, `100.64–100.127.x`, `172.16–172.31.x` hoặc `192.168.x` (khác External Address):
+  nhà mạng đang dùng **CGNAT** — mở cổng trên modem **không có tác dụng**. Dùng cách A, hoặc đề nghị nhà mạng
+  cấp IP public (Viettel: tổng đài 18008168) rồi dùng cách B.
+
+### 12.2 Cách A — Tailscale (chạy được cả khi bị CGNAT, khuyến nghị)
+
+Tailscale tạo mạng riêng mã hóa đầu-cuối giữa các thiết bị của bạn. NAS tự kết nối ra ngoài nên không cần mở cổng
+trên modem. Gói miễn phí đủ cho nhu cầu cá nhân. Đã kiểm tra: điện thoại dùng 4G mở được phần mềm trên DS215j.
+
+1. **Trung tâm gói** → tìm `Tailscale` → **Cài đặt**. Khi DSM hỏi mở cổng UDP 41641 cho Tailscale → **OK**.
+2. Trên DSM 7.1, giao diện web của gói có thể chỉ hiện vòng xoay hoặc báo `not authorized`. Khi đó tạo tác vụ
+   **Scheduled Task → User-defined script**, tên `EEMC Tailscale dang nhap`, người dùng **root**, **bỏ chọn Enabled**, lệnh:
+
+   ```sh
+   T=/var/packages/Tailscale/target/bin/tailscale
+   O=/volume1/eemc/tailscale.txt
+   date > $O
+   ( $T up --hostname=eemc-nas >> $O 2>&1 & )
+   sleep 20
+   $T status >> $O 2>&1
+   $T ip -4 >> $O 2>&1
+   ```
+
+   **Run** → mở `eemc/tailscale.txt` → mở đường link `https://login.tailscale.com/a/…` trong tệp → tự đăng nhập
+   tài khoản Tailscale → **Connect**. **Run** lại lần nữa: tệp sẽ ghi địa chỉ Tailscale của NAS (dạng `100.x.y.z`).
+   Không gửi đường link đăng nhập này cho người khác.
+3. **Tường lửa NAS** (nếu đã bật, mục 6): thêm quy tắc **Allow**, Ports **All**, Source IP **Subnet**
+   `100.64.0.0` / `255.192.0.0`, kéo lên **trên** quy tắc Deny.
+4. Trên mỗi máy tính / điện thoại cần dùng: cài Tailscale (https://tailscale.com/download), đăng nhập **cùng tài khoản**,
+   rồi mở `http://<địa chỉ 100.x của NAS>:8088` (hoặc `http://eemc-nas:8088` nếu bật MagicDNS).
+5. Nên tắt hết hạn khóa cho NAS: https://login.tailscale.com/admin/machines → `eemc-nas` → **…** →
+   **Disable key expiry**. Nếu không, khoảng 180 ngày NAS phải đăng nhập lại (chạy lại bước 2).
+
+Lưu ý: máy tính công ty có thể cần phòng CNTT cho phép cài Tailscale. Dữ liệu đi trong Tailscale đã được mã hóa,
+nên dùng `http://` với địa chỉ `100.x` vẫn an toàn.
+
+### 12.3 Cách B — tên miền và mở cổng (chỉ khi có IP public)
+
+Không cần cài gì trên máy dùng, mở bằng trình duyệt ở bất cứ đâu, nhưng NAS lộ một cổng ra Internet.
+
+1. **Bảng điều khiển → Mạng → Giao diện mạng**: đặt IP cố định cho NAS.
+2. **Truy cập bên ngoài → DDNS → Thêm**: nhà cung cấp **Synology**, tên `<tên>.synology.me`, Địa chỉ IPv6 **Tắt**,
+   chọn **Lấy chứng chỉ từ Let's Encrypt và đặt làm mặc định** → **Kiểm tra kết nối** → **OK**.
+3. Proxy ngược như mục 5 nhưng **Nguồn**: HTTPS, Tên máy chủ `<tên>.synology.me`, Cổng `443`, bật HSTS;
+   **Đích**: HTTP, `localhost`, `8088`; tab **Tiêu đề tùy chỉnh** → **WebSocket**.
+4. Tường lửa NAS: quy tắc **Allow** cho TCP `443` từ mọi nơi (phía trên quy tắc Deny).
+5. Trên modem: **Forward Rules → Port Mapping** → TCP `443` → IP của NAS, cổng `443`.
+   **Không** mở các cổng DSM `5000/5001` ra Internet.
+6. Mở `https://<tên>.synology.me` từ mạng khác (điện thoại tắt Wi-Fi) để kiểm tra.
