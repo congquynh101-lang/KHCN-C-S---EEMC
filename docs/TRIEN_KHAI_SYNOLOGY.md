@@ -18,7 +18,8 @@ Bạn sửa mã ──► GitHub (nhánh main) ──► GitHub Actions đóng g
 | Bộ nhớ | Còn trống khoảng 300 MB RAM; dữ liệu ban đầu dưới 50 MB |
 | Mạng | NAS có địa chỉ IP cố định trong mạng nội bộ (ví dụ `192.168.1.20`) |
 
-> Nếu Trung tâm gói không có Container Manager, dòng NAS của bạn không hỗ trợ Docker — xem mục 10 (máy ảo).
+> Nếu Trung tâm gói không có Container Manager, dòng NAS của bạn không hỗ trợ Docker — xem mục 11
+> (chạy trực tiếp, đã thử trên DS215j) hoặc mục 10 (máy ảo).
 
 ## 1. Ảnh phần mềm trên GitHub
 
@@ -150,3 +151,60 @@ Chỉ dùng khi NAS không có Container Manager nhưng có **Virtual Machine Ma
 Cài Windows Server/Windows 10 trong máy ảo (cần bản quyền), rồi dùng bộ cài
 `EEMC-WorkManager-Web-2.0.0-CaiDat.zip` → chạy `CaiDat-Web.bat` như trên máy chủ Windows thông thường.
 Phương án này nặng hơn và phải tự cập nhật Windows.
+
+## 11. NAS đời cũ không có Docker (ví dụ DS215j, ARM 32-bit)
+
+Phần mềm chạy trực tiếp bằng .NET 8 (bản `linux-arm` tự chứa, không cần cài .NET lên NAS), tự khởi động cùng NAS
+qua **Task Scheduler**. Đã chạy thực tế trên **DS215j** (Marvell Armada 375, RAM 512 MB, DSM 7.1.1): phần mềm dùng
+khoảng 85 MB RAM, lần mở đầu mất khoảng 3 giây, các trang sau dưới 0,1 giây.
+
+Điều kiện: DSM 7.x, CPU ARMv7 có NEON (xem `install.txt` sau bước 11.3), đã có Volume và thư mục chia sẻ.
+
+### 11.1 Đóng gói (trên máy Windows có .NET 8 SDK)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\synology-native\dong-goi.ps1
+```
+
+Kết quả ở `BanCaiDat\nas-linux-arm`: `app.part00` … `app.part05` (mỗi phần dưới 9 MB), `app.sha256`, `install.sh`, `start.sh`.
+
+### 11.2 Chuẩn bị NAS (một lần)
+
+1. **Storage Manager**: nếu chưa có, tạo Storage Pool + Volume (ổ mới sẽ bị xóa trắng).
+2. **Bảng điều khiển → Thư mục chia sẻ → Tạo**: tên `eemc`, trên Volume 1, **không mã hóa** (để tự khởi động được).
+3. **File Station**: chép `install.sh`, `start.sh` vào `eemc/`; chép `app.part*` và `app.sha256` vào `eemc/upload/`.
+
+### 11.3 Tạo tác vụ (Bảng điều khiển → Task Scheduler → Tạo)
+
+| Tên tác vụ | Loại | Người dùng | Lệnh (tab Task Settings) |
+|---|---|---|---|
+| `EEMC cai dat va kiem tra` | Scheduled Task → User-defined script, **bỏ chọn Enabled** (chỉ chạy tay) | tài khoản quản trị DSM | `sh /volume1/eemc/install.sh` |
+| `EEMC Work Manager Web` | Triggered Task → User-defined script, sự kiện **Boot-up** | tài khoản quản trị DSM | `sh /volume1/eemc/start.sh` |
+
+Tên tác vụ chỉ được dùng chữ không dấu, số và dấu cách.
+
+1. Chọn `EEMC cai dat va kiem tra` → **Run**. Khoảng 10 giây sau mở `eemc/install.txt`: phải có dòng `cai dat: OK`
+   (tệp này cũng ghi phiên bản glibc, ICU, OpenSSL, CPU, RAM của NAS).
+2. Chọn `EEMC Work Manager Web` → **Run**. Khoảng 30 giây sau mở `http://<IP-NAS>:8088` → tạo tài khoản quản trị (mục 4).
+
+Từ đây phần mềm tự chạy mỗi khi NAS khởi động. HTTPS: dùng Proxy ngược như mục 5 (đích `localhost:8088`).
+
+### 11.4 Cập nhật bản mới
+
+1. Đóng gói lại (11.1).
+2. File Station: xóa các tệp cũ trong `eemc/upload/`, chép `app.part*` và `app.sha256` mới vào.
+   Nếu thiếu hoặc thừa phần, `install.sh` sẽ báo lỗi và không động tới bản đang chạy.
+3. Run `EEMC cai dat va kiem tra` → kiểm tra `install.txt` → Run `EEMC Work Manager Web` (khởi động lại phần mềm).
+
+Bản trước được giữ ở `eemc/app.old`; dữ liệu trong `eemc/data` không bị động tới.
+
+### 11.5 Ghi chú kỹ thuật
+
+- Thư viện SQLite đi kèm .NET cần glibc 2.28 trong khi DSM 7.1 có glibc 2.26: `start.sh` tự dùng SQLite có sẵn
+  của DSM (DS215j: 3.34.1, cùng giao diện `sqlite3_*`). Đã kiểm tra tạo cơ sở dữ liệu, ghi dữ liệu và tự sao lưu.
+- `start.sh` giới hạn bộ nhớ .NET (`DOTNET_GCHeapHardLimit` = 160 MB, chế độ máy trạm) cho NAS ít RAM.
+- Dữ liệu và bản sao lưu nằm trong `eemc/data` (cấu trúc như mục 7). Nhật ký: `eemc/data/console.log`,
+  `eemc/data/start.log`, `eemc/data/logs/`.
+- **Quên mật khẩu**: tạo tác vụ chạy tay với lệnh
+  `cd /volume1/eemc/app && EEMC_WM_DATA=/volume1/eemc/data ./EEMC.WM.Web --reset-password <tên đăng nhập> <mật khẩu mới>`,
+  Run một lần, rồi **xóa tác vụ đó** (vì mật khẩu nằm trong lệnh).
