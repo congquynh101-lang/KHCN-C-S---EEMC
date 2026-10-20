@@ -1,0 +1,124 @@
+@page "/today"
+@inherits LivePage
+
+<PageTitle>Công việc hôm nay – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <div>
+        <div class="muted">@Labels.DayOfWeekVi(Now.DayOfWeek), @Now.ToString("dd/MM/yyyy HH:mm")</div>
+        <h1>Công việc hôm nay</h1>
+    </div>
+    <span class="spacer"></span>
+    <button class="btn" @onclick="() => OpenEditor(due: Now.Date)"><Icon Name="plus" Class="sm" />Thêm việc hạn hôm nay</button>
+</div>
+
+<div class="grid grid-main">
+    <div class="card">
+        <div class="card-head">
+            <h2>Thứ tự xử lý đề xuất</h2>
+            <span class="spacer"></span>
+            <label class="check small"><input type="checkbox" @bind="_showAll" @bind:after="SafeLoadAsync" /> Hiện toàn bộ việc đang xử lý</label>
+        </div>
+        <div class="muted mb">Xếp theo ma trận Eisenhower kết hợp thời hạn thực tế, thời lượng dự kiến, lịch cố định và công việc phụ thuộc. Mức ưu tiên bạn đặt không bị thay đổi.</div>
+        @if (_ranked.Count == 0) { <div class="empty">Không có công việc cần xử lý trong thời gian tới.</div> }
+        @foreach (var a in _ranked) { <TaskCard Item="a.Task" Assessment="a" /> }
+    </div>
+
+    <div class="stack">
+        <div class="card">
+            <div class="card-head">
+                <h2>Lịch đề xuất hôm nay</h2>
+                <span class="spacer"></span>
+                @if (_blocks.Any(b => !b.IsFixed && !Applied(b)))
+                {
+                    <button class="btn sm" @onclick="ApplyAll" title="Ghi thời gian bắt đầu theo kế hoạch cho các khối trong ngày">Chấp thuận cả lịch</button>
+                }
+            </div>
+            <div class="muted mb">@_summary</div>
+            @foreach (var b in _blocks)
+            {
+                <div class="timeline-item">
+                    <div style="width:96px;flex:none">
+                        <b>@b.Start.ToString("HH:mm") – @b.End.ToString("HH:mm")</b>
+                        <div class="tertiary small">@($"{b.Hours:0.##} giờ"){(b.IsEstimate ? " (ước tính)" : "")}</div>
+                    </div>
+                    <div style="flex:1;min-width:0">
+                        <a href="/tasks/@b.Task.Id">@b.Task.Title</a>
+                        <div class="small"><span class="c-blue">@(b.IsFixed ? "Lịch cố định" : Applied(b) ? "Đã đưa vào kế hoạch" : "Đề xuất")</span>
+                            · <span class="c-@Ui.DueColor(b.Task, Now)">@Ui.Remaining(b.Task, Now)</span></div>
+                    </div>
+                    @if (!b.IsFixed && !Applied(b))
+                    {
+                        <button class="btn sm" @onclick="() => Apply(b)">Chấp thuận</button>
+                    }
+                </div>
+            }
+            @if (_warnings.Count > 0)
+            {
+                <h3 class="mt">Cảnh báo thời gian</h3>
+                @foreach (var w in _warnings)
+                {
+                    <div class="mt-s @(w.IsCertain ? "b-red" : "b-orange")" style="padding:8px 10px;border-radius:6px">
+                        <div class="small" style="font-weight:600"><a href="/tasks/@w.Task.Id">@w.Task.Title</a></div>
+                        <div class="small @(w.IsCertain ? "c-red" : "c-orange")">@w.Message</div>
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="card">
+            <h2>Chờ phối hợp / phản hồi / phê duyệt — cần đôn đốc</h2>
+            @if (_waiting.Count == 0) { <div class="empty">Không có công việc đang chờ.</div> }
+            @foreach (var a in _waiting)
+            {
+                <TaskCard Item="a.Task" Assessment="a">
+                    @if (a.Task.ExpectedResponseAt.HasValue)
+                    {
+                        <div class="small mt-s @(a.Task.ExpectedResponseAt <= Now ? "c-red" : "")">Dự kiến phản hồi: @Ui.Dt(a.Task.ExpectedResponseAt) @(string.IsNullOrEmpty(a.Task.Coordinator) ? "" : "· " + a.Task.Coordinator)</div>
+                    }
+                </TaskCard>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool _showAll;
+    private List<PriorityAssessment> _ranked = new(), _waiting = new();
+    private List<ScheduledBlock> _blocks = new();
+    private List<ScheduleWarning> _warnings = new();
+    private string _summary = "";
+
+    private static bool Applied(ScheduledBlock b) => b.Task.PlannedStart == b.Start;
+
+    protected override async Task LoadAsync()
+    {
+        var s = Settings.Current;
+        var open = await Tasks.GetOpenTasksAsync();
+        var engine = new PriorityEngine(s);
+        var ranked = engine.RankDirectWork(open, Now);
+        var soon = Now.Date.AddDays(s.DueSoonDays + 1);
+        _ranked = _showAll ? ranked : ranked.Where(a => a.Task.DueAt < soon || (a.Task.PlannedStart.HasValue && a.Task.PlannedStart.Value.Date <= Now.Date)
+                                                         || a.Task.Status == WorkTaskStatus.InProgress || a.TimeRisk).ToList();
+        var proposal = new ScheduleEngine(s).Propose(open, Now);
+        _blocks = proposal.BlocksOn(Now.Date).ToList();
+        _warnings = proposal.Warnings.OrderByDescending(w => w.IsCertain).ThenBy(w => w.Task.DueAt).ToList();
+        _waiting = engine.RankWaiting(open, Now);
+        var work = _blocks.Where(b => !b.IsFixed).Sum(b => b.Hours);
+        _summary = !s.IsWorkDay(Now) ? "Hôm nay không phải ngày làm việc theo cấu hình."
+            : _blocks.Count == 0 ? "Không còn khung giờ trống hoặc không có việc cần xếp lịch hôm nay."
+            : $"Đề xuất {work:0.#} giờ xử lý công việc. Khối \"ước tính\" dùng thời lượng mặc định {s.DefaultEstimateHours:0.#} giờ.";
+    }
+
+    private async Task Apply(ScheduledBlock b)
+    {
+        try { await Tasks.SetPlannedStartAsync(b.Task.Id, b.Start); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không cập nhật được kế hoạch"); }
+    }
+
+    private async Task ApplyAll()
+    {
+        foreach (var g in _blocks.Where(b => !b.IsFixed && !Applied(b)).GroupBy(b => b.Task.Id))
+            await Tasks.SetPlannedStartAsync(g.Key, g.Min(b => b.Start));
+        UiSvc.Success("Đã đưa lịch đề xuất hôm nay vào kế hoạch.");
+    }
+}

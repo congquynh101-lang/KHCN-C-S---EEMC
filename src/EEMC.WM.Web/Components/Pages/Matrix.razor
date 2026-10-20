@@ -1,0 +1,34 @@
+@page "/matrix"
+@inherits LivePage
+
+<PageTitle>Ma trận ưu tiên – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Ma trận ưu tiên (Eisenhower)</h1>
+</div>
+<div class="muted mb">
+    Quan trọng = mức ưu tiên Cao hoặc Khẩn cấp (do bạn đặt). Khẩn cấp = quá hạn, còn ≤ 2 ngày, hoặc chắc chắn không đủ thời gian theo thời lượng dự kiến.
+    Công việc đang chờ đơn vị khác không nằm trong ma trận (xem trang Công việc hôm nay).
+</div>
+<div class="matrix">
+    @foreach (var q in new[] { EisenhowerQuadrant.DoNow, EisenhowerQuadrant.Schedule, EisenhowerQuadrant.QuickHandle, EisenhowerQuadrant.Later })
+    {
+        var items = _all.Where(a => a.Quadrant == q).ToList();
+        var color = q switch { EisenhowerQuadrant.DoNow => "red", EisenhowerQuadrant.Schedule => "blue", EisenhowerQuadrant.QuickHandle => "orange", _ => "gray" };
+        <div class="quad" style="border-top:3px solid var(--@color)">
+            <h2><span class="dot bg-@color"></span>@Labels.Of(q)<span class="spacer"></span><span class="badge b-@color">@items.Count</span></h2>
+            @if (items.Count == 0) { <div class="empty">Không có công việc.</div> }
+            @foreach (var a in items.Take(30)) { <TaskCard Item="a.Task" Assessment="a" ShowReasons="false" /> }
+            @if (items.Count > 30) { <div class="small muted mt-s">… và @(items.Count - 30) công việc khác</div> }
+        </div>
+    }
+</div>
+
+@code {
+    private List<PriorityAssessment> _all = new();
+
+    protected override async Task LoadAsync()
+    {
+        var open = await Tasks.GetOpenTasksAsync();
+        _all = new PriorityEngine(Settings.Current).RankDirectWork(open, Now);
+    }
+}

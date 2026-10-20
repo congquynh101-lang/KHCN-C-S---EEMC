@@ -1,0 +1,272 @@
+@page "/tasks"
+@inherits LivePage
+@inject CategoryService Categories
+@inject ProjectService Projects
+@inject ExcelExportService Excel
+
+<PageTitle>@(_trash ? "Thùng rác" : "Tất cả công việc") – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>@(_trash ? "Thùng rác" : "Tất cả công việc")</h1>
+    <span class="spacer"></span>
+    <span class="muted">@_summary</span>
+</div>
+
+<div class="card mb" style="padding:12px 14px">
+    <div class="row">
+        <div class="search" style="max-width:300px">
+            <Icon Name="search" Class="sm" />
+            <input class="input" placeholder="Tìm (không cần dấu)..." @bind="_q" @bind:event="oninput" @bind:after="Requery" />
+        </div>
+        <select class="input" style="width:auto" @bind="_status" @bind:after="Requery">
+            <option value="open">Chưa hoàn thành</option>
+            <option value="direct">Đang trực tiếp xử lý</option>
+            <option value="waiting">Chờ phối hợp/phản hồi/phê duyệt</option>
+            <option value="all">Tất cả trạng thái</option>
+            @foreach (var s in Enum.GetValues<WorkTaskStatus>()) { <option value="@s">• @Labels.Of(s)</option> }
+        </select>
+        <select class="input" style="width:auto" @bind="_prio" @bind:after="Requery">
+            <option value="">Mọi mức ưu tiên</option>
+            <option value="high">Cao và Khẩn cấp</option>
+            @foreach (var p in new[] { TaskPriority.Urgent, TaskPriority.High, TaskPriority.Normal, TaskPriority.Low }) { <option value="@p">@Labels.Of(p)</option> }
+        </select>
+        <select class="input" style="width:auto" @bind="_time" @bind:after="Requery">
+            <option value="">Mọi thời hạn</option>
+            <option value="overdue">Quá hạn</option>
+            <option value="today">Hôm nay</option>
+            <option value="soon">Sắp đến hạn</option>
+            <option value="week">Hạn trong tuần này</option>
+            <option value="nextweek">Hạn tuần sau</option>
+            <option value="month">Hạn trong tháng này</option>
+            <option value="recvweek">Nhận trong tuần này</option>
+            <option value="doneweek">Hoàn thành trong tuần này</option>
+        </select>
+        <select class="input" style="width:auto;max-width:220px" @bind="_group" @bind:after="Requery">
+            <option value="0">Mọi nhóm nghiệp vụ</option>
+            @foreach (var g in _groups) { <option value="@g.Id">@g.Name</option> }
+        </select>
+        <select class="input" style="width:auto" @bind="_sort" @bind:after="Requery">
+            <option value="Suggested">Sắp: Ưu tiên đề xuất</option>
+            <option value="DueAt">Sắp: Hạn hoàn thành</option>
+            <option value="Priority">Sắp: Mức ưu tiên</option>
+            <option value="ReceivedAt">Sắp: Ngày nhận</option>
+            <option value="Status">Sắp: Trạng thái</option>
+            <option value="Code">Sắp: Mã</option>
+            <option value="UpdatedAt">Sắp: Cập nhật gần nhất</option>
+        </select>
+        <label class="check small"><input type="checkbox" @bind="_desc" @bind:after="Requery" /> Giảm dần</label>
+        <button class="btn ghost sm" @onclick="Clear">Bỏ lọc</button>
+    </div>
+</div>
+
+<div class="row mb">
+    @if (!_trash)
+    {
+        <button class="btn primary" @onclick="() => OpenEditor()"><Icon Name="plus" Class="sm" />Thêm</button>
+        <button class="btn" disabled="@(_sel.Count == 0)" @onclick="CompleteSelected"><Icon Name="check" Class="sm" />Hoàn thành</button>
+        <button class="btn" disabled="@(_sel.Count != 1)" @onclick="Duplicate"><Icon Name="copy" Class="sm" />Sao chép</button>
+        <button class="btn danger" disabled="@(_sel.Count == 0)" @onclick="Trash"><Icon Name="trash" Class="sm" />Xóa</button>
+    }
+    else
+    {
+        <button class="btn primary" disabled="@(_sel.Count == 0)" @onclick="Restore">Khôi phục</button>
+        <button class="btn danger" disabled="@(_sel.Count == 0)" @onclick="Purge"><Icon Name="trash" Class="sm" />Xóa vĩnh viễn</button>
+    }
+    <span class="spacer"></span>
+    <button class="btn" @onclick="ExportExcel"><Icon Name="download" Class="sm" />Xuất Excel</button>
+    <button class="btn" @onclick="ToggleTrash"><Icon Name="@(_trash ? "chevron-left" : "trash")" Class="sm" />@(_trash ? "Quay lại danh sách" : $"Thùng rác ({_trashCount})")</button>
+</div>
+
+<div class="card flush">
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th style="width:34px"><input type="checkbox" checked="@(_items.Count > 0 && _sel.Count == _items.Count)" @onchange="ToggleAll" /></th>
+                    <th>Mã</th><th>Nội dung công việc</th><th>Hạn hoàn thành</th><th>Còn lại</th><th>Ưu tiên</th><th>Trạng thái</th>
+                    <th class="hide-mobile">Tiến độ</th><th class="hide-mobile">Dự án / Nhóm</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in _items)
+                {
+                    var overdue = !StatusGroups.IsClosed(t.Status) && t.DueAt < Now;
+                    <tr class="@(overdue ? "overdue" : "") @(_sel.Contains(t.Id) ? "selected" : "")">
+                        <td><input type="checkbox" checked="@_sel.Contains(t.Id)" @onchange="() => Toggle(t.Id)" /></td>
+                        <td class="nowrap small">@t.Code</td>
+                        <td class="title">
+                            <a href="/tasks/@t.Id">@t.Title</a>
+                            @if (t.ParentId.HasValue) { <span class="badge b-gray" title="Công việc con"><Icon Name="sub" Class="sm" /></span> }
+                            @if (t.IsBlocked) { <span class="badge b-orange" title="Chờ @string.Join(", ", t.BlockedBy)"><Icon Name="dep" Class="sm" /></span> }
+                        </td>
+                        <td class="nowrap">@Ui.Dt(t.DueAt)</td>
+                        <td class="nowrap"><b class="c-@Ui.DueColor(t, Now)">@Ui.Remaining(t, Now)</b></td>
+                        <td><span class="badge b-@Ui.PriorityColor(t.Priority)">@Labels.Of(t.Priority)</span></td>
+                        <td class="nowrap"><span class="badge b-@Ui.StatusColor(t.Status)">@Labels.Of(t.Status)</span></td>
+                        <td class="hide-mobile"><div class="progress" title="@t.Progress%"><div style="width:@(t.Progress)%"></div></div></td>
+                        <td class="hide-mobile small ellipsis" style="max-width:220px">@(t.Project?.Name ?? t.ProjectName ?? t.Category?.DisplayName)</td>
+                        <td class="nowrap">
+                            @if (!_trash)
+                            {
+                                <StatusMenu Item="t" />
+                                <button class="btn sm ghost icon-only" @onclick="() => OpenEditor(t.Id)" title="Sửa"><Icon Name="edit" Class="sm" /></button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_items.Count == 0 && !Loading) { <div class="empty">@(_trash ? "Thùng rác trống." : "Không có công việc phù hợp bộ lọc.")</div> }
+    </div>
+    <div class="pager">
+        <button class="btn sm" disabled="@(_page <= 1)" @onclick="() => Go(1)">«</button>
+        <button class="btn sm" disabled="@(_page <= 1)" @onclick="() => Go(_page - 1)">‹ Trước</button>
+        <span class="small">Trang <b>@_page</b> / @_pageCount</span>
+        <button class="btn sm" disabled="@(_page >= _pageCount)" @onclick="() => Go(_page + 1)">Sau ›</button>
+        <button class="btn sm" disabled="@(_page >= _pageCount)" @onclick="() => Go(_pageCount)">»</button>
+        <span class="spacer"></span>
+        <span class="small muted">Số dòng/trang</span>
+        <select class="input" style="width:auto" @bind="_size" @bind:after="Requery">
+            <option value="50">50</option><option value="100">100</option><option value="200">200</option>
+        </select>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? QParam { get; set; }
+    [SupplyParameterFromQuery(Name = "status")] public string? StatusParam { get; set; }
+    [SupplyParameterFromQuery(Name = "time")] public string? TimeParam { get; set; }
+    [SupplyParameterFromQuery(Name = "prio")] public string? PrioParam { get; set; }
+
+    private string _q = "", _status = "open", _prio = "", _time = "", _sort = "Suggested";
+    private int _group, _page = 1, _pageCount = 1, _size = 100, _trashCount, _total;
+    private bool _desc, _trash;
+    private string _summary = "";
+    private List<WorkTask> _items = new();
+    private List<Category> _groups = new();
+    private readonly HashSet<int> _sel = new();
+    private string? _lastParams;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{QParam}|{StatusParam}|{TimeParam}|{PrioParam}";
+        if (key == _lastParams) return;
+        _lastParams = key;
+        _q = QParam ?? "";
+        _status = string.IsNullOrEmpty(StatusParam) ? "open" : StatusParam;
+        _time = TimeParam ?? "";
+        _prio = PrioParam ?? "";
+        _page = 1;
+        _trash = false;
+        if (_groups.Count == 0) _groups = (await Categories.GetAllAsync()).Where(c => c.ParentId == null).ToList();
+        await SafeLoadAsync();
+    }
+
+    private TaskQuery BuildQuery(bool all = false)
+    {
+        var q = new TaskQuery
+        {
+            Search = _q,
+            Deleted = _trash,
+            Page = _page,
+            PageSize = _size,
+            Sort = Enum.TryParse<SortField>(_sort, out var sf) ? sf : SortField.Suggested,
+            SortDescending = _desc,
+            CategoryGroupId = _group == 0 ? null : _group,
+            Time = _time switch
+            {
+                "overdue" => TimeFilter.Overdue, "today" => TimeFilter.Today, "soon" => TimeFilter.DueSoon,
+                "week" => TimeFilter.ThisWeek, "nextweek" => TimeFilter.NextWeek, "month" => TimeFilter.ThisMonth,
+                "recvweek" => TimeFilter.ReceivedThisWeek, "doneweek" => TimeFilter.CompletedThisWeek, _ => TimeFilter.All
+            }
+        };
+        switch (_status)
+        {
+            case "open": q.StatusFilter = StatusFilter.Open; break;
+            case "direct": q.StatusFilter = StatusFilter.DirectWork; break;
+            case "waiting": q.StatusFilter = StatusFilter.Waiting; break;
+            case "all": q.StatusFilter = StatusFilter.All; break;
+            default:
+                q.StatusFilter = StatusFilter.Specific;
+                q.Status = Enum.TryParse<WorkTaskStatus>(_status, out var st) ? st : null;
+                break;
+        }
+        if (_prio == "high") q.MinPriority = TaskPriority.High;
+        else if (Enum.TryParse<TaskPriority>(_prio, out var p)) q.Priority = p;
+        return q;
+    }
+
+    protected override async Task LoadAsync()
+    {
+        var r = await Tasks.QueryAsync(BuildQuery());
+        if (r.Items.Count == 0 && r.Total > 0 && _page > 1) { _page = r.PageCount; r = await Tasks.QueryAsync(BuildQuery()); }
+        _items = r.Items.ToList();
+        _total = r.Total;
+        _pageCount = r.PageCount;
+        _trashCount = await Tasks.CountTrashAsync();
+        _sel.IntersectWith(_items.Select(i => i.Id));
+        var from = r.Total == 0 ? 0 : (r.Page - 1) * r.PageSize + 1;
+        _summary = r.Total == 0 ? "" : $"Hiển thị {from:N0}–{from + _items.Count - 1:N0} / {r.Total:N0} công việc";
+    }
+
+    private async Task Requery() { _page = 1; await SafeLoadAsync(); }
+    private async Task Go(int p) { _page = Math.Clamp(p, 1, _pageCount); await SafeLoadAsync(); }
+    private async Task Clear() { _q = ""; _status = "open"; _prio = ""; _time = ""; _group = 0; _sort = "Suggested"; _desc = false; await Requery(); }
+    private async Task ToggleTrash() { _trash = !_trash; _sel.Clear(); await Requery(); }
+    private void Toggle(int id) { if (!_sel.Remove(id)) _sel.Add(id); }
+    private void ToggleAll() { if (_sel.Count == _items.Count) _sel.Clear(); else _sel.UnionWith(_items.Select(i => i.Id)); }
+
+    private async Task CompleteSelected()
+    {
+        var list = _items.Where(i => _sel.Contains(i.Id) && !StatusGroups.IsClosed(i.Status)).ToList();
+        if (list.Count == 0) return;
+        if (!await UiSvc.ConfirmAsync($"Xác nhận HOÀN THÀNH {list.Count} công việc đã chọn?", "Hoàn thành")) return;
+        foreach (var t in list) await Tasks.ChangeStatusAsync(t.Id, WorkTaskStatus.Completed);
+        UiSvc.Success($"Đã ghi nhận hoàn thành {list.Count} công việc.");
+    }
+
+    private async Task Duplicate()
+    {
+        try
+        {
+            var copy = await Tasks.DuplicateAsync(_sel.First());
+            UiSvc.Success($"Đã tạo bản sao {copy.Code}");
+            OpenEditor(copy.Id);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không sao chép được"); }
+    }
+
+    private async Task Trash()
+    {
+        if (!await UiSvc.ConfirmAsync($"Chuyển {_sel.Count} công việc vào thùng rác?\n(Có thể khôi phục.)", "Chuyển vào thùng rác", danger: true)) return;
+        await Tasks.MoveToTrashAsync(_sel.ToList());
+        _sel.Clear();
+    }
+
+    private async Task Restore()
+    {
+        await Tasks.RestoreAsync(_sel.ToList());
+        UiSvc.Success("Đã khôi phục.");
+        _sel.Clear();
+    }
+
+    private async Task Purge()
+    {
+        if (!await UiSvc.ConfirmAsync($"XÓA VĨNH VIỄN {_sel.Count} công việc?\nKhông thể khôi phục (trừ khi phục hồi từ bản sao lưu).", "Xóa vĩnh viễn", danger: true)) return;
+        await Tasks.PurgeAsync(_sel.ToList());
+        _sel.Clear();
+    }
+
+    private async Task ExportExcel()
+    {
+        try
+        {
+            var all = await Tasks.QueryAllAsync(BuildQuery());
+            var path = Path.Combine(Path.GetTempPath(), $"eemc-{Guid.NewGuid():N}.xlsx");
+            await Excel.ExportTasksAsync(all, path, Now, _trash ? "Công việc trong thùng rác" : "Danh sách công việc");
+            var bytes = await File.ReadAllBytesAsync(path);
+            File.Delete(path);
+            await UiSvc.DownloadAsync(bytes, $"DanhSachCongViec_{Now:yyyyMMdd_HHmm}.xlsx");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không xuất được Excel"); }
+    }
+}

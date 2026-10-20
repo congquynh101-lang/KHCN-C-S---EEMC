@@ -1,0 +1,74 @@
+@inject ProjectService Projects
+@inject UiService UiSvc
+
+<div class="overlay">
+    <div class="dialog">
+        <div class="dialog-head">
+            <h2 style="margin:0">@(Project.Id == 0 ? "Thêm dự án KH&CN" : "Cập nhật dự án")</h2>
+            <span class="spacer"></span>
+            <button class="btn ghost icon-only" @onclick="OnClose"><Icon Name="close" /></button>
+        </div>
+        <div class="grid grid-2">
+            <div>
+                <label class="field"><span>Tên đề tài/dự án *</span><textarea class="input" rows="2" @bind="_m.Name"></textarea></label>
+                <label class="field"><span>Mã dự án (để trống để tự sinh DA-năm-số)</span><input class="input" @bind="_m.Code" /></label>
+                <label class="field"><span>Cấp quản lý</span>
+                    <input class="input" list="levels" @bind="_m.ManagementLevel" />
+                    <datalist id="levels">@foreach (var l in ProjectService.ManagementLevels) { <option value="@l"></option> }</datalist>
+                </label>
+                <label class="field"><span>Đơn vị chủ trì</span><input class="input" @bind="_m.LeadUnit" /></label>
+                <label class="field"><span>Chủ nhiệm</span><input class="input" @bind="_m.Leader" /></label>
+                <div class="grid grid-2">
+                    <label class="field"><span>Bắt đầu</span><input type="date" class="input" value="@Ui.ToDateInput(_m.StartDate)" @onchange="e => _m.StartDate = Ui.FromInput(e.Value?.ToString())" /></label>
+                    <label class="field"><span>Kết thúc</span><input type="date" class="input" value="@Ui.ToDateInput(_m.EndDate)" @onchange="e => _m.EndDate = Ui.FromInput(e.Value?.ToString())" /></label>
+                </div>
+                <label class="field"><span>Tình trạng</span>
+                    <select class="input" @bind="_m.Status">@foreach (var s in Enum.GetValues<ProjectStatus>()) { <option value="@s">@Labels.Of(s)</option> }</select>
+                </label>
+            </div>
+            <div>
+                <label class="field"><span>Mô tả, mục tiêu</span><textarea class="input" rows="3" @bind="_m.Description"></textarea></label>
+                <label class="field"><span>Các vấn đề tồn đọng</span><textarea class="input" rows="3" @bind="_m.Issues"></textarea></label>
+                <label class="field"><span>Những quyết định cần xin ý kiến</span><textarea class="input" rows="3" @bind="_m.DecisionsNeeded"></textarea></label>
+                <label class="field"><span>Thư mục hồ sơ (mạng nội bộ)</span><input class="input" @bind="_m.FolderPath" /></label>
+                <label class="check mt"><input type="checkbox" @bind="_m.IsArchived" /> Lưu trữ (ẩn khỏi danh sách đang theo dõi)</label>
+            </div>
+        </div>
+        @if (!string.IsNullOrEmpty(_error)) { <div class="validation">@_error</div> }
+        <div class="dialog-foot">
+            <button class="btn" @onclick="OnClose">Hủy</button>
+            <button class="btn primary" @onclick="SaveAsync">Lưu dự án</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Project Project { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Project> OnSaved { get; set; }
+    private Project _m = new();
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        var p = Project;
+        _m = new Project
+        {
+            Id = p.Id, Code = p.Code, Name = p.Name, ManagementLevel = p.ManagementLevel, LeadUnit = p.LeadUnit, Leader = p.Leader,
+            StartDate = p.StartDate, EndDate = p.EndDate, Status = p.Status, Description = p.Description, Issues = p.Issues,
+            DecisionsNeeded = p.DecisionsNeeded, FolderPath = p.FolderPath, IsArchived = p.IsArchived
+        };
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            var saved = await Projects.SaveAsync(_m);
+            UiSvc.Success($"Đã lưu {saved.Code}");
+            await OnSaved.InvokeAsync(saved);
+        }
+        catch (ValidationException ex) { _error = string.Join("\n", ex.Errors); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được dự án"); }
+    }
+}

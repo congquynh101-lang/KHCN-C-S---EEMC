@@ -1,0 +1,111 @@
+@page "/timeline"
+@inherits LivePage
+@inject ProjectService Projects
+
+<PageTitle>Tiến độ (Gantt) – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Tiến độ (Gantt)</h1>
+    <span class="spacer"></span>
+    <select class="input" style="width:auto" @bind="_projectId" @bind:after="SafeLoadAsync">
+        <option value="0">Tất cả công việc chưa hoàn thành</option>
+        @foreach (var p in _projects) { <option value="@p.Id">@p.Code – @p.Name</option> }
+    </select>
+    <div class="seg">
+        <button class="@(_days == 30 ? "on" : "")" @onclick="() => SetRange(30)">30 ngày</button>
+        <button class="@(_days == 90 ? "on" : "")" @onclick="() => SetRange(90)">3 tháng</button>
+        <button class="@(_days == 180 ? "on" : "")" @onclick="() => SetRange(180)">6 tháng</button>
+    </div>
+</div>
+<div class="legend mb">
+    <span>Thanh: từ ngày bắt đầu (kế hoạch, hoặc ngày nhận) đến hạn hoàn thành; phần đậm = tiến độ</span>
+    <span><i class="bg-red"></i>Quá hạn</span><span><i class="bg-orange"></i>Ưu tiên cao</span><span><i class="bg-blue"></i>Bình thường</span><span><i class="bg-green"></i>Hoàn thành</span>
+    <span><i class="bg-purple" style="transform:rotate(45deg)"></i>Mốc dự án</span><span><i class="bg-red" style="width:2px"></i>Hôm nay</span>
+</div>
+
+<div class="gantt">
+    <div class="gantt-row head">
+        <div class="gantt-label">Công việc</div>
+        <div class="gantt-track" style="min-width:@Ui.Px(Width)">
+            @for (var d = _from; d < _to; d = d.AddDays(1))
+            {
+                if (d.Day == 1 || d == _from || (_days <= 30 && d.DayOfWeek == DayOfWeek.Monday))
+                {
+                    <div class="gantt-tick" style="left:@Ui.Px(X(d))">@(d.Day == 1 || d == _from ? d.ToString("dd/MM") : d.ToString("dd"))</div>
+                }
+            }
+        </div>
+    </div>
+    @foreach (var m in _milestones)
+    {
+        <div class="gantt-row">
+            <div class="gantt-label" title="@m.Name"><Icon Name="milestone" Class="sm" /> @m.Name</div>
+            <div class="gantt-track" style="min-width:@Ui.Px(Width)">
+                <div class="gantt-today" style="left:@Ui.Px(X(Now))"></div>
+                @if (m.DueDate.HasValue) { <div class="gantt-ms" style="left:@Ui.Px(X(m.DueDate.Value) - 6);@(m.CompletedAt != null ? "background:var(--green)" : "")" title="@m.Name — @Ui.D(m.DueDate)"></div> }
+            </div>
+        </div>
+    }
+    @foreach (var t in _rows)
+    {
+        var start = Start(t);
+        var color = StatusGroups.IsClosed(t.Status) ? "green" : t.DueAt < Now ? "red" : t.Priority >= TaskPriority.High ? "orange" : "blue";
+        <div class="gantt-row">
+            <div class="gantt-label" title="@t.Code — @t.Title">
+                @if (t.ParentId != null) { <span style="padding-left:14px"></span> }
+                <a href="/tasks/@t.Id">@t.Title</a>
+            </div>
+            <div class="gantt-track" style="min-width:@Ui.Px(Width)">
+                <div class="gantt-today" style="left:@Ui.Px(X(Now))"></div>
+                <div class="gantt-bar bg-@color" style="left:@Ui.Px(X(start));width:@Ui.Px(Math.Max(6, X(t.DueAt) - X(start)))" title="@t.Code: @Ui.Dt(start) → @Ui.Dt(t.DueAt) · @t.Progress% · @Labels.Of(t.Status)">
+                    <div class="fill" style="width:@(t.Status == WorkTaskStatus.Completed ? 100 : t.Progress)%"></div>
+                </div>
+            </div>
+        </div>
+    }
+    @if (_rows.Count == 0) { <div class="empty">Không có công việc trong khoảng thời gian này.</div> }
+</div>
+
+@code {
+    private const double Px = 22;
+    private int _days = 30, _projectId;
+    private DateTime _from, _to;
+    private List<WorkTask> _rows = new();
+    private List<Milestone> _milestones = new();
+    private List<Project> _projects = new();
+
+    private double PxPerDay => _days <= 30 ? Px : Px * 30 / _days * 2;
+    private double Width => _days * PxPerDay;
+    private double X(DateTime d) => Math.Clamp((d - _from).TotalDays * PxPerDay, 0, Width);
+
+    private static DateTime Start(WorkTask t) => t.PlannedStart.HasValue && t.PlannedStart < t.DueAt ? t.PlannedStart.Value : t.ReceivedAt;
+
+    private async Task SetRange(int d) { _days = d; await SafeLoadAsync(); }
+
+    protected override async Task LoadAsync()
+    {
+        _projects = await Projects.GetActiveListAsync();
+        _from = Now.Date.AddDays(-7);
+        _to = _from.AddDays(_days);
+        List<WorkTask> list;
+        if (_projectId != 0)
+        {
+            list = await Projects.GetTasksAsync(_projectId);
+            _milestones = (await Projects.GetAsync(_projectId))?.Milestones ?? new();
+        }
+        else
+        {
+            list = await Tasks.GetOpenTasksAsync();
+            _milestones = new();
+        }
+        // Sắp cha trước con
+        var inRange = list.Where(t => Start(t) < _to && t.DueAt >= _from).ToList();
+        var parents = inRange.Where(t => t.ParentId == null || inRange.All(p => p.Id != t.ParentId)).OrderBy(Start).ThenBy(t => t.DueAt).ToList();
+        _rows = new();
+        foreach (var p in parents)
+        {
+            _rows.Add(p);
+            _rows.AddRange(inRange.Where(c => c.ParentId == p.Id).OrderBy(Start));
+        }
+        _rows = _rows.Take(300).ToList();
+    }
+}

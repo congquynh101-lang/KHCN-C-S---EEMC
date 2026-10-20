@@ -1,0 +1,67 @@
+@page "/documents"
+@inherits LivePage
+@inject AttachmentService Attachments
+
+<PageTitle>Hồ sơ tài liệu – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Hồ sơ tài liệu</h1>
+    <span class="spacer"></span>
+    <span class="muted">@_rows.Count tài liệu</span>
+</div>
+<div class="card mb" style="padding:12px 14px">
+    <div class="row">
+        <div class="search" style="max-width:360px">
+            <Icon Name="search" Class="sm" />
+            <input class="input" placeholder="Tên tài liệu, số văn bản, công việc, dự án..." @bind="_q" @bind:event="oninput" @bind:after="SafeLoadAsync" />
+        </div>
+        <select class="input" style="width:auto" @bind="_kind" @bind:after="SafeLoadAsync">
+            <option value="">Mọi loại tài liệu</option>
+            @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
+        </select>
+        <select class="input" style="width:auto" @bind="_status" @bind:after="SafeLoadAsync">
+            <option value="">Mọi tình trạng</option>
+            @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
+        </select>
+    </div>
+</div>
+<div class="muted mb">Thêm tài liệu trong trang chi tiết của từng công việc hoặc dự án (tab "Hồ sơ").</div>
+<div class="card flush">
+    <div class="table-wrap">
+        <table class="data">
+            <thead><tr><th>Tài liệu</th><th>Loại</th><th>Số văn bản</th><th>Tình trạng</th><th>Công việc / Dự án</th><th>Ngày thêm</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    var a = r.Attachment;
+                    <tr>
+                        <td class="title">
+                            @if (a.StoredFile != null) { <a href="/files/@a.Id?inline=true" target="_blank"><Icon Name="file" Class="sm" /> @a.Name</a> <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)</span> }
+                            else if (a.Link!.StartsWith("http", StringComparison.OrdinalIgnoreCase)) { <a href="@a.Link" target="_blank" rel="noopener"><Icon Name="link" Class="sm" /> @a.Name</a> }
+                            else { <span><Icon Name="folder" Class="sm" /> @a.Name</span><div class="tertiary small">@a.Link</div> }
+                        </td>
+                        <td class="nowrap">@Labels.Of(a.Kind)</td>
+                        <td class="nowrap">@a.DocumentNumber</td>
+                        <td class="nowrap">@Labels.Of(a.DocumentStatus)</td>
+                        <td class="small">
+                            @if (a.TaskId.HasValue) { <a href="/tasks/@a.TaskId">@r.TaskCode</a> <span>@r.TaskTitle</span> }
+                            @if (a.ProjectId.HasValue) { <a href="/projects/@a.ProjectId">@r.ProjectName</a> }
+                        </td>
+                        <td class="nowrap small">@Ui.Dt(a.CreatedAt)</td>
+                        <td>@if (a.StoredFile != null) { <a class="btn sm ghost icon-only" href="/files/@a.Id" title="Tải về"><Icon Name="download" Class="sm" /></a> }</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_rows.Count == 0 && !Loading) { <div class="empty">Không có tài liệu phù hợp.</div> }
+    </div>
+</div>
+
+@code {
+    private string _q = "", _kind = "", _status = "";
+    private List<AttachmentRow> _rows = new();
+
+    protected override async Task LoadAsync() =>
+        _rows = await Attachments.SearchAsync(_q,
+            Enum.TryParse<AttachmentKind>(_kind, out var k) ? k : null,
+            Enum.TryParse<DocumentStatus>(_status, out var s) ? s : null);
+}

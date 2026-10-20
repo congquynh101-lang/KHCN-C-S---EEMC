@@ -1,0 +1,87 @@
+@page "/kanban"
+@inherits LivePage
+@inject ProjectService Projects
+
+<PageTitle>Bảng Kanban – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Bảng Kanban</h1>
+    <span class="spacer"></span>
+    <select class="input" style="width:auto" @bind="_projectId" @bind:after="SafeLoadAsync">
+        <option value="0">Tất cả dự án</option>
+        @foreach (var p in _projects) { <option value="@p.Id">@p.Code – @p.Name</option> }
+    </select>
+    <label class="check small"><input type="checkbox" @bind="_showDone" @bind:after="SafeLoadAsync" /> Hiện việc hoàn thành 14 ngày qua</label>
+</div>
+<div class="muted mb">Kéo thả thẻ sang cột khác để đổi trạng thái. Chuyển sang "Hoàn thành" luôn cần xác nhận.</div>
+
+<div class="kanban">
+    @foreach (var lane in Lanes)
+    {
+        var items = _tasks.Where(t => lane.Statuses.Contains(t.Status)).OrderBy(t => t.DueAt).ToList();
+        <div class="lane @(_dropLane == lane.Key ? "drop" : "")" ondragover="event.preventDefault()"
+             @ondragenter="() => _dropLane = lane.Key" @ondrop="() => DropAsync(lane)">
+            <div class="lane-head"><span class="dot bg-@lane.Color"></span>@lane.Title<span class="spacer"></span><span class="badge b-gray">@items.Count</span></div>
+            @foreach (var t in items.Take(100))
+            {
+                var color = Ui.DueColor(t, Now) == "red" ? "red" : Ui.PriorityColor(t.Priority);
+                <div class="kcard" style="border-left-color:var(--@color)" draggable="true" @ondragstart="() => _drag = t">
+                    <a class="task-title" href="/tasks/@t.Id" style="font-size:13px">@t.Title</a>
+                    <div class="task-meta">
+                        <span>@t.Code</span>
+                        <b class="c-@Ui.DueColor(t, Now)">@Ui.Remaining(t, Now)</b>
+                    </div>
+                    <div class="task-meta">
+                        <span class="badge b-@Ui.PriorityColor(t.Priority)">@Labels.Of(t.Priority)</span>
+                        @if (lane.Statuses.Length > 1) { <span class="badge b-@Ui.StatusColor(t.Status)">@Labels.Of(t.Status)</span> }
+                        @if (t.IsBlocked) { <span class="badge b-orange">Chờ @string.Join(", ", t.BlockedBy)</span> }
+                        @if (t.Progress > 0) { <span>@t.Progress%</span> }
+                    </div>
+                </div>
+            }
+            @if (items.Count > 100) { <div class="small muted">… và @(items.Count - 100) công việc khác (xem ở Tất cả công việc)</div> }
+        </div>
+    }
+</div>
+
+@code {
+    private sealed record Lane(string Key, string Title, string Color, WorkTaskStatus[] Statuses, WorkTaskStatus Target);
+
+    private static readonly Lane[] Lanes =
+    {
+        new("todo", "Chưa thực hiện", "gray", new[] { WorkTaskStatus.NotStarted }, WorkTaskStatus.NotStarted),
+        new("doing", "Đang thực hiện", "blue", new[] { WorkTaskStatus.InProgress }, WorkTaskStatus.InProgress),
+        new("docs", "Cần bổ sung hồ sơ", "orange", new[] { WorkTaskStatus.NeedMoreDocuments }, WorkTaskStatus.NeedMoreDocuments),
+        new("wait", "Chờ phối hợp / phản hồi", "gray", new[] { WorkTaskStatus.WaitingCoordinator, WorkTaskStatus.WaitingResponse }, WorkTaskStatus.WaitingResponse),
+        new("approve", "Chờ lãnh đạo phê duyệt", "purple", new[] { WorkTaskStatus.WaitingApproval }, WorkTaskStatus.WaitingApproval),
+        new("hold", "Tạm dừng", "gray", new[] { WorkTaskStatus.OnHold }, WorkTaskStatus.OnHold),
+        new("done", "Hoàn thành", "green", new[] { WorkTaskStatus.Completed }, WorkTaskStatus.Completed),
+    };
+
+    private List<WorkTask> _tasks = new();
+    private List<Project> _projects = new();
+    private int _projectId;
+    private bool _showDone = true;
+    private WorkTask? _drag;
+    private string? _dropLane;
+
+    protected override async Task LoadAsync()
+    {
+        _projects = await Projects.GetActiveListAsync();
+        var list = await Tasks.GetOpenTasksAsync();
+        if (_showDone)
+        {
+            var done = await Tasks.QueryAllAsync(new TaskQuery { StatusFilter = StatusFilter.Specific, Status = WorkTaskStatus.Completed, Sort = SortField.UpdatedAt, SortDescending = true });
+            list.AddRange(done.Where(t => t.CompletedAt >= Now.AddDays(-14)));
+        }
+        _tasks = _projectId == 0 ? list : list.Where(t => t.ProjectId == _projectId).ToList();
+    }
+
+    private async Task DropAsync(Lane lane)
+    {
+        _dropLane = null;
+        var t = _drag;
+        _drag = null;
+        if (t == null || lane.Statuses.Contains(t.Status)) return;
+        await SetStatusAsync(t, lane.Target);
+    }
+}

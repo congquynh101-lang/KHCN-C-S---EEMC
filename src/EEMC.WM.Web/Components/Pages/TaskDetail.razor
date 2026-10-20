@@ -1,0 +1,238 @@
+@page "/tasks/{Id:int}"
+@inherits LivePage
+@inject AttachmentService Attachments
+@inject ProjectService Projects
+
+<PageTitle>@(_t?.Code ?? "Công việc") – EEMC Work Manager</PageTitle>
+
+@if (_t == null)
+{
+    <div class="card">@(Loading ? "Đang tải..." : "Không tìm thấy công việc (có thể đã bị xóa vĩnh viễn).") <a href="/tasks">Về danh sách</a></div>
+}
+else
+{
+    <div class="page-head">
+        <div style="flex:1 1 320px;min-width:0">
+            <div class="muted">
+                <a href="/tasks">Công việc</a> ›
+                @if (_parent != null) { <a href="/tasks/@_parent.Id">@_parent.Code</a> <span>›</span> }
+                @_t.Code
+                @if (_t.IsDeleted) { <span class="badge b-red">Trong thùng rác</span> }
+            </div>
+            <h1 style="font-size:22px">@_t.Title</h1>
+            <div class="task-meta">
+                <span class="badge b-@Ui.PriorityColor(_t.Priority)">@Labels.Of(_t.Priority)</span>
+                <span class="badge b-@Ui.StatusColor(_t.Status)">@Labels.Of(_t.Status)</span>
+                <span>Hạn @Ui.Dt(_t.DueAt)</span>
+                <b class="c-@Ui.DueColor(_t, Now)">@Ui.Remaining(_t, Now)</b>
+                @if (_t.IsBlocked) { <span class="badge b-orange">Chờ @string.Join(", ", _t.BlockedBy)</span> }
+            </div>
+        </div>
+        <div class="row">
+            @if (!StatusGroups.IsClosed(_t.Status))
+            {
+                @if (_t.Status != WorkTaskStatus.InProgress) { <button class="btn" @onclick="() => SetStatusAsync(_t, WorkTaskStatus.InProgress)"><Icon Name="play" Class="sm" />Bắt đầu</button> }
+                <button class="btn success" @onclick="() => SetStatusAsync(_t, WorkTaskStatus.Completed)"><Icon Name="check" Class="sm" />Hoàn thành</button>
+            }
+            <StatusMenu Item="_t" />
+            <button class="btn primary" @onclick="() => OpenEditor(_t.Id)"><Icon Name="edit" Class="sm" />Sửa</button>
+        </div>
+    </div>
+
+    @if (_assessment != null && !StatusGroups.IsClosed(_t.Status))
+    {
+        <div class="card mb" style="padding:12px 16px">
+            <b>Đánh giá ưu tiên:</b> @Labels.Of(_assessment.Urgency) • @Labels.Of(_assessment.Quadrant) • Điểm @_assessment.Score.ToString("0")
+            <div class="muted">@_assessment.Explanation</div>
+            @if (_assessment.SuggestionDiffers) { <div class="small c-orange">Đề xuất mức ưu tiên: @Labels.Of(_assessment.SuggestedPriority) (chỉ tham khảo)</div> }
+        </div>
+    }
+
+    <div class="tabs">
+        <button class="@(_tab == "info" ? "on" : "")" @onclick='() => _tab = "info"'>Thông tin</button>
+        <button class="@(_tab == "sub" ? "on" : "")" @onclick='() => _tab = "sub"'>Công việc con (@_children.Count)</button>
+        <button class="@(_tab == "dep" ? "on" : "")" @onclick='() => _tab = "dep"'>Phụ thuộc (@_deps.Count)</button>
+        <button class="@(_tab == "doc" ? "on" : "")" @onclick='() => _tab = "doc"'>Hồ sơ (@_files.Count)</button>
+        <button class="@(_tab == "his" ? "on" : "")" @onclick='() => _tab = "his"'>Trao đổi, lịch sử</button>
+    </div>
+
+    @switch (_tab)
+    {
+        case "info":
+            <div class="grid grid-2">
+                <div class="card">
+                    <table class="data">
+                        <tbody>
+                            @Row("Ngày giờ nhận", Ui.Dt(_t.ReceivedAt))
+                            @Row("Hạn hoàn thành", Ui.Dt(_t.DueAt))
+                            @Row("Nhóm công việc", _t.Category?.DisplayName)
+                            @Row("Dự án KH&CN", _project?.Name ?? _t.ProjectName)
+                            @Row("Người giao việc", _t.AssignedBy)
+                            @Row("Người thực hiện", _t.Assignee)
+                            @Row("Đơn vị phối hợp", _t.Coordinator)
+                            @Row("Dự kiến phản hồi", Ui.Dt(_t.ExpectedResponseAt))
+                            @Row("Thời lượng dự kiến", _t.EstimatedHours is > 0 ? $"{_t.EstimatedHours:0.#} giờ" : "Chưa ước tính")
+                            @Row("Bắt đầu theo kế hoạch", Ui.Dt(_t.PlannedStart) + (_t.IsFixedTime ? " (cố định)" : ""))
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card">
+                    <div class="muted">Tiến độ</div>
+                    <div class="row"><div class="progress" style="flex:1;height:8px"><div style="width:@(_t.Progress)%"></div></div><b>@_t.Progress%</b></div>
+                    @if (_children.Count > 0) { <div class="small muted">Tính tự động từ @_children.Count công việc con (có trọng số).</div> }
+                    <table class="data mt">
+                        <tbody>
+                            @Row("Tình trạng hồ sơ", Labels.Of(_t.DocumentStatus))
+                            @Row("Số văn bản", _t.DocumentNumber)
+                            @Row("Thư mục hồ sơ", _t.FolderPath)
+                            @Row("Kết quả bàn giao", _t.Deliverable)
+                            @Row("Xin ý kiến lãnh đạo", _t.LeaderOpinionNeeded)
+                            @Row("Ghi chú", _t.Notes)
+                            @Row("Hoàn thành lúc", Ui.Dt(_t.CompletedAt))
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            break;
+
+        case "sub":
+            <div class="card">
+                <div class="card-head">
+                    <h2>Công việc con</h2>
+                    <span class="spacer"></span>
+                    @if (_t.ParentId == null) { <button class="btn primary sm" @onclick="() => OpenEditor(parentId: _t.Id, due: _t.DueAt)"><Icon Name="plus" Class="sm" />Thêm công việc con</button> }
+                </div>
+                @if (_t.ParentId != null) { <div class="muted">Đây là công việc con của <a href="/tasks/@_t.ParentId">@_parent?.Code</a>. Chỉ hỗ trợ một cấp công việc con.</div> }
+                else if (_children.Count == 0) { <div class="empty">Chưa có công việc con. Chia công việc lớn thành các bước, mỗi bước có hạn, trạng thái và người phụ trách riêng.</div> }
+                @foreach (var c in _children)
+                {
+                    <TaskCard Item="c" ShowReasons="false">
+                        <div class="small muted mt-s">Trọng số @c.Weight.ToString("0.##") · Tiến độ @c.Progress% @(string.IsNullOrEmpty(c.Assignee) ? "" : "· Phụ trách: " + c.Assignee)</div>
+                    </TaskCard>
+                }
+            </div>
+            break;
+
+        case "dep":
+            <div class="card">
+                <h2>Công việc phải hoàn thành trước</h2>
+                <div class="row mb">
+                    <input class="input" style="max-width:360px" placeholder="Tìm công việc theo mã hoặc nội dung..." @bind="_depSearch" @bind:event="oninput" @bind:after="SearchDeps" />
+                </div>
+                @foreach (var s in _depResults)
+                {
+                    <div class="row small mb-s">
+                        <span class="spacer">@s.Code — @s.Title</span>
+                        <button class="btn sm" @onclick="() => AddDep(s.Id)">Thêm vào "phải chờ"</button>
+                    </div>
+                }
+                @foreach (var d in _deps.Where(d => d.IsPredecessor))
+                {
+                    <TaskCard Item="d.Task" ShowReasons="false" Compact="true">
+                        <button class="btn sm ghost mt-s" @onclick="() => RemoveDep(d.Task.Id)">Bỏ phụ thuộc</button>
+                    </TaskCard>
+                }
+                @if (!_deps.Any(d => d.IsPredecessor)) { <div class="empty">Công việc này không phải chờ công việc nào.</div> }
+                <h2 class="mt">Công việc đang chờ công việc này</h2>
+                @foreach (var d in _deps.Where(d => !d.IsPredecessor)) { <TaskCard Item="d.Task" ShowReasons="false" Compact="true" /> }
+                @if (!_deps.Any(d => !d.IsPredecessor)) { <div class="empty">Không có.</div> }
+            </div>
+            break;
+
+        case "doc":
+            <AttachmentPanel TaskId="_t.Id" />
+            break;
+
+        case "his":
+            <div class="card">
+                <h2>Ghi nhận trao đổi, xử lý</h2>
+                <textarea class="input" rows="3" placeholder="Nội dung trao đổi, kết quả xử lý, ý kiến chỉ đạo..." @bind="_comment"></textarea>
+                <div class="row mt-s"><span class="spacer"></span><button class="btn primary" @onclick="AddComment">Thêm ghi nhận</button></div>
+                <div class="mt">
+                    @foreach (var h in _history)
+                    {
+                        <div class="timeline-item">
+                            <div style="width:130px;flex:none" class="tertiary small">@Ui.Dt(h.At)</div>
+                            <div style="flex:1 1 320px;min-width:0">
+                                <b class="@(h.IsComment ? "c-blue" : "")">@h.Action</b>
+                                <div style="white-space:pre-line">@h.Detail</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+            break;
+    }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private WorkTask? _t, _parent;
+    private Project? _project;
+    private PriorityAssessment? _assessment;
+    private List<WorkTask> _children = new(), _depResults = new();
+    private List<TaskService.DependencyInfo> _deps = new();
+    private List<TaskHistory> _history = new();
+    private List<Attachment> _files = new();
+    private string _tab = "info", _comment = "", _depSearch = "";
+    private int _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != Id) { _loadedId = Id; _tab = "info"; await SafeLoadAsync(); }
+    }
+
+    protected override async Task LoadAsync()
+    {
+        if (Id == 0) return;
+        _t = await Tasks.GetAsync(Id);
+        if (_t == null) return;
+        var open = await Tasks.GetOpenTasksAsync();
+        var o = open.FirstOrDefault(x => x.Id == Id);
+        if (o != null) { _t.DependsOnIds = o.DependsOnIds; _t.BlockedBy = o.BlockedBy; }
+        _assessment = new PriorityEngine(Settings.Current).Assess(_t, Now);
+        _parent = _t.ParentId.HasValue ? await Tasks.GetAsync(_t.ParentId.Value) : null;
+        _project = _t.ProjectId.HasValue ? await Projects.GetAsync(_t.ProjectId.Value) : null;
+        _children = await Tasks.GetChildrenAsync(Id);
+        _deps = await Tasks.GetDependenciesAsync(Id);
+        _history = await Tasks.GetHistoryAsync(Id);
+        _files = await Attachments.GetForTaskAsync(Id);
+    }
+
+    private static RenderFragment Row(string label, string? value) => __builder =>
+    {
+        <tr><td class="muted nowrap" style="width:40%">@label</td><td style="white-space:pre-line">@(string.IsNullOrWhiteSpace(value) ? "—" : value)</td></tr>
+    };
+
+    private async Task AddComment()
+    {
+        if (string.IsNullOrWhiteSpace(_comment)) return;
+        try
+        {
+            await Tasks.AddCommentAsync(Id, _comment);
+            _comment = "";
+            _history = await Tasks.GetHistoryAsync(Id);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thêm được ghi nhận"); }
+    }
+
+    private async Task SearchDeps()
+    {
+        _depResults = string.IsNullOrWhiteSpace(_depSearch) ? new() :
+            (await Tasks.SearchQuickAsync(_depSearch, 8)).Where(x => x.Id != Id && _deps.All(d => d.Task.Id != x.Id)).ToList();
+    }
+
+    private async Task AddDep(int otherId)
+    {
+        try
+        {
+            await Tasks.AddDependencyAsync(Id, otherId);
+            _depSearch = "";
+            _depResults.Clear();
+            UiSvc.Success("Đã thêm công việc phụ thuộc.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thêm được phụ thuộc"); }
+    }
+
+    private async Task RemoveDep(int otherId) => await Tasks.RemoveDependencyAsync(Id, otherId);
+}

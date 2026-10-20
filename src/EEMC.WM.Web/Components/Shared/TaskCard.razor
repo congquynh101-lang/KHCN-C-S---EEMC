@@ -1,0 +1,58 @@
+@inject UiService UiSvc
+@inject TaskService Tasks
+@inject IClock Clock
+
+<div class="task-card">
+    <div class="strip bg-@Ui.PriorityColor(Item.Priority)"></div>
+    <div class="body">
+        <a class="task-title" href="/tasks/@Item.Id">@Item.Title</a>
+        <div class="task-meta">
+            <span>@Item.Code</span>
+            <span>Hạn @Ui.Dt(Item.DueAt)</span>
+            <b class="c-@Ui.DueColor(Item, Clock.Now)">@Ui.Remaining(Item, Clock.Now)</b>
+            <span class="badge b-@Ui.PriorityColor(Item.Priority)">@Labels.Of(Item.Priority)</span>
+            <span class="badge b-@Ui.StatusColor(Item.Status)">@Labels.Of(Item.Status)</span>
+            @if (Item.IsBlocked) { <span class="badge b-orange"><Icon Name="dep" Class="sm" />Chờ @string.Join(", ", Item.BlockedBy)</span> }
+        </div>
+        @if (Assessment != null && ShowReasons)
+        {
+            <div class="reasons">@Assessment.Explanation</div>
+            @if (Assessment.SuggestionDiffers) { <div class="small c-orange">Đề xuất mức ưu tiên: @Labels.Of(Assessment.SuggestedPriority)</div> }
+        }
+        @ChildContent
+    </div>
+    @if (!Compact)
+    {
+        <div class="task-actions">
+            @if (Item.Status != WorkTaskStatus.InProgress && !StatusGroups.IsClosed(Item.Status))
+            {
+                <button class="btn sm" @onclick="() => Set(WorkTaskStatus.InProgress)" title="Chuyển sang Đang thực hiện"><Icon Name="play" Class="sm" /><span class="hide-mobile">Bắt đầu</span></button>
+            }
+            @if (!StatusGroups.IsClosed(Item.Status))
+            {
+                <button class="btn sm success" @onclick="() => Set(WorkTaskStatus.Completed)" title="Ghi nhận hoàn thành (cần xác nhận)"><Icon Name="check" Class="sm" /><span class="hide-mobile">Hoàn thành</span></button>
+            }
+            <StatusMenu Item="Item" />
+            <button class="btn sm ghost icon-only" @onclick="() => UiSvc.RequestEditor(new EditorRequest(Item.Id))" title="Sửa nhanh"><Icon Name="edit" Class="sm" /></button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public WorkTask Item { get; set; } = default!;
+    [Parameter] public PriorityAssessment? Assessment { get; set; }
+    [Parameter] public bool ShowReasons { get; set; } = true;
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private async Task Set(WorkTaskStatus s)
+    {
+        if (s == WorkTaskStatus.Completed && !await UiSvc.ConfirmAsync($"Xác nhận HOÀN THÀNH công việc?\n[{Item.Code}] {Item.Title}", "Hoàn thành")) return;
+        try
+        {
+            await Tasks.ChangeStatusAsync(Item.Id, s);
+            UiSvc.Success($"{Item.Code}: {Labels.Of(s)}");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không đổi được trạng thái"); }
+    }
+}

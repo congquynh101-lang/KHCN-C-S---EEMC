@@ -1,0 +1,260 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject UiService UiSvc
+@inject NotificationService Notifications
+@inject NotificationBus Bus
+@inject TaskService Tasks
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IClock Clock
+
+<div class="shell">
+    <aside class="sidebar @(_menuOpen ? "open" : "")" @onclick="() => _menuOpen = false">
+        <div class="brand">
+            <div class="brand-logo"><Icon Name="check" /></div>
+            <div>
+                <div class="brand-name">EEMC Work Manager</div>
+                <div class="muted">Thư ký KH&amp;CN và ĐMST</div>
+            </div>
+        </div>
+        <nav class="nav">
+            <NavLink href="" Match="NavLinkMatch.All"><Icon Name="home" />Tổng quan</NavLink>
+            <NavLink href="today"><Icon Name="today" />Công việc hôm nay</NavLink>
+            <NavLink href="tasks"><Icon Name="list" />Tất cả công việc</NavLink>
+            <NavLink href="calendar"><Icon Name="calendar" />Lịch làm việc</NavLink>
+            <NavLink href="kanban"><Icon Name="kanban" />Bảng Kanban</NavLink>
+            <NavLink href="timeline"><Icon Name="gantt" />Tiến độ (Gantt)</NavLink>
+            <NavLink href="matrix"><Icon Name="matrix" />Ma trận ưu tiên</NavLink>
+            <div class="nav-section">QUẢN LÝ</div>
+            <NavLink href="projects"><Icon Name="project" />Dự án KH&amp;CN</NavLink>
+            <NavLink href="documents"><Icon Name="file" />Hồ sơ tài liệu</NavLink>
+            <NavLink href="reports"><Icon Name="report" />Báo cáo</NavLink>
+            <NavLink href="settings"><Icon Name="settings" />Cài đặt</NavLink>
+        </nav>
+        <div class="sidebar-foot">
+            <AuthorizeView>
+                <Authorized>
+                    <div class="row nowrap">
+                        <Icon Name="people" />
+                        <span class="ellipsis spacer">@context.User.Identity?.Name</span>
+                        <form method="post" action="/account/logout">
+                            <button class="btn ghost sm" type="submit" title="Đăng xuất"><Icon Name="logout" Class="sm" /></button>
+                        </form>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+            <div class="tertiary mt-s">Tổng công ty Thiết bị điện Đông Anh – CTCP</div>
+        </div>
+    </aside>
+
+    <div class="main">
+        <header class="topbar">
+            <button class="btn ghost icon-only menu-btn" @onclick="() => _menuOpen = !_menuOpen" title="Menu"><Icon Name="menu" /></button>
+            <div class="search">
+                <Icon Name="search" Class="sm" />
+                <input id="global-search" class="input" placeholder="Tìm công việc, dự án, số văn bản...  ( / )" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" />
+            </div>
+            <button class="btn primary" @onclick="() => UiSvc.RequestEditor(new EditorRequest(null))" title="Phím tắt: N">
+                <Icon Name="plus" Class="sm" /><span class="hide-mobile">Thêm công việc</span>
+            </button>
+            <div class="spacer"></div>
+            <div class="hide-mobile right" style="line-height:1.2">
+                <div style="font-weight:600;font-size:16px">@Clock.Now.ToString("HH:mm")</div>
+                <div class="muted">@Labels.DayOfWeekVi(Clock.Now.DayOfWeek), @Clock.Now.ToString("dd/MM/yyyy")</div>
+            </div>
+            <button class="btn ghost icon-only" @onclick="ToggleTheme" title="Giao diện sáng/tối"><Icon Name="@(_dark ? "sun" : "moon")" /></button>
+            <div class="rel">
+                <button class="btn ghost icon-only rel" @onclick="ToggleNotifications" title="Thông báo nhắc việc">
+                    <Icon Name="bell" />
+                    @if (_unread > 0) { <span class="count">@_unread</span> }
+                </button>
+                @if (_notifOpen)
+                {
+                    <div class="popover">
+                        <div class="row mb-s">
+                            <h2 style="margin:0">Thông báo nhắc việc</h2>
+                            <span class="spacer"></span>
+                            <button class="btn sm" @onclick="MarkAllRead">Đã đọc hết</button>
+                            <button class="btn ghost sm icon-only" @onclick="() => _notifOpen = false"><Icon Name="close" Class="sm" /></button>
+                        </div>
+                        @if (_notifPermission == "default")
+                        {
+                            <button class="btn sm mb-s" @onclick="AskPermission"><Icon Name="bell" Class="sm" />Bật thông báo trên máy tính/điện thoại</button>
+                        }
+                        @if (_notifs.Count == 0) { <div class="empty">Chưa có thông báo.</div> }
+                        @foreach (var n in _notifs)
+                        {
+                            <div class="notif @(n.IsRead ? "read" : "")">
+                                <span class="dot bg-@(n.Severity == NotificationSeverity.Critical ? "red" : n.Severity == NotificationSeverity.Warning ? "orange" : "blue")" style="margin-top:6px"></span>
+                                <div style="flex:1;min-width:0">
+                                    <div class="row nowrap"><b class="spacer">@n.Title</b><span class="tertiary small nowrap">@Ui.Dt(n.CreatedAt)</span></div>
+                                    <div class="small" style="white-space:pre-line">@n.Message</div>
+                                    <div class="row mt-s">
+                                        @if (n.TaskId.HasValue)
+                                        {
+                                            <button class="btn sm" @onclick="() => OpenTask(n)">Mở</button>
+                                            <button class="btn sm" @onclick='() => Snooze(n, TimeSpan.FromMinutes(15))'>Hoãn 15'</button>
+                                            <button class="btn sm" @onclick='() => Snooze(n, TimeSpan.FromHours(1))'>Hoãn 1 giờ</button>
+                                            <button class="btn sm" @onclick="() => SnoozeTomorrow(n)">Đến mai</button>
+                                        }
+                                        @if (!n.IsRead) { <button class="btn sm ghost" @onclick="() => MarkRead(n)">Đã đọc</button> }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </header>
+        <main class="page">
+            <ErrorBoundary @ref="_errorBoundary">
+                <ChildContent>@Body</ChildContent>
+            </ErrorBoundary>
+        </main>
+    </div>
+</div>
+
+<TaskEditorDialog />
+
+@if (UiSvc.ConfirmMessage != null)
+{
+    <div class="overlay" @onclick="() => UiSvc.ResolveConfirm(false)">
+        <div class="dialog small" @onclick:stopPropagation>
+            <div style="white-space:pre-line;font-size:14px">@UiSvc.ConfirmMessage</div>
+            <div class="dialog-foot">
+                <button class="btn" @onclick="() => UiSvc.ResolveConfirm(false)">Không</button>
+                <button class="btn primary" style="@(UiSvc.ConfirmDanger ? "background:var(--red);border-color:var(--red)" : "")" @onclick="() => UiSvc.ResolveConfirm(true)">@UiSvc.ConfirmOk</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="toasts">
+    @foreach (var t in UiSvc.Toasts.ToList())
+    {
+        <div class="toast @t.Kind" @onclick="() => UiSvc.Dismiss(t.Id)">@t.Message</div>
+    }
+</div>
+
+@code {
+    private bool _menuOpen, _notifOpen, _dark;
+    private string _search = "";
+    private int _unread;
+    private string _notifPermission = "";
+    private List<AppNotification> _notifs = new();
+    private ErrorBoundary? _errorBoundary;
+    private DotNetObjectReference<MainLayout>? _self;
+
+    protected override async Task OnInitializedAsync()
+    {
+        UiSvc.Changed += OnUiChanged;
+        Bus.Published += OnPublished;
+        Notifications.Changed += OnNotificationsChanged;
+        await LoadNotificationsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _dark = await JS.InvokeAsync<string?>("eemc.getTheme") == "dark";
+            _notifPermission = await JS.InvokeAsync<string>("eemc.notifyState");
+            _self = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("eemc.registerShortcuts", _self);
+            StateHasChanged();
+        }
+        catch (JSDisconnectedException) { }
+    }
+
+    protected override void OnParametersSet() => _errorBoundary?.Recover();
+
+    [JSInvokable]
+    public async Task OnShortcut(string key)
+    {
+        if (key == "new") UiSvc.RequestEditor(new EditorRequest(null));
+        else if (key == "search") await JS.InvokeVoidAsync("eemc.focus", "global-search");
+    }
+
+    private void OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_search))
+            Nav.NavigateTo($"/tasks?q={Uri.EscapeDataString(_search.Trim())}&status=all");
+    }
+
+    private async Task ToggleTheme()
+    {
+        _dark = !_dark;
+        await JS.InvokeVoidAsync("eemc.setTheme", _dark);
+    }
+
+    private async Task LoadNotificationsAsync()
+    {
+        _notifs = await Notifications.GetRecentAsync(100);
+        _unread = await Notifications.CountUnreadAsync();
+    }
+
+    private async Task ToggleNotifications()
+    {
+        _notifOpen = !_notifOpen;
+        if (_notifOpen) await LoadNotificationsAsync();
+    }
+
+    private async Task AskPermission()
+    {
+        _notifPermission = await JS.InvokeAsync<string>("eemc.notifyPermission");
+    }
+
+    private void OnUiChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnNotificationsChanged(object? s, EventArgs e) => InvokeAsync(async () => { await LoadNotificationsAsync(); StateHasChanged(); });
+
+    private void OnPublished(IReadOnlyList<AppNotification> items) => InvokeAsync(async () =>
+    {
+        await LoadNotificationsAsync();
+        foreach (var n in items.Take(3))
+        {
+            UiSvc.Show($"{n.Title}: {n.Message.Split('\n')[0]}", n.Severity == NotificationSeverity.Critical ? ToastKind.Error : ToastKind.Warning);
+            try { await UiSvc.BrowserNotifyAsync(n.Title, n.Message); } catch { }
+        }
+        StateHasChanged();
+    });
+
+    private async Task MarkAllRead() => await Notifications.MarkAllReadAsync();
+    private async Task MarkRead(AppNotification n) => await Notifications.MarkReadAsync(n.Id);
+
+    private async Task OpenTask(AppNotification n)
+    {
+        await Notifications.MarkReadAsync(n.Id);
+        _notifOpen = false;
+        Nav.NavigateTo($"/tasks/{n.TaskId}");
+    }
+
+    private async Task Snooze(AppNotification n, TimeSpan span)
+    {
+        await Tasks.SnoozeAsync(n.TaskId!.Value, Clock.Now.Add(span));
+        await Notifications.MarkReadAsync(n.Id);
+        UiSvc.Success("Đã tạm hoãn nhắc việc.");
+    }
+
+    private async Task SnoozeTomorrow(AppNotification n)
+    {
+        var s = Settings.Current;
+        var start = s.WorkPeriods.Count > 0 ? s.WorkPeriods.Min(p => p.Start) : TimeSpan.FromHours(8);
+        var d = Clock.Now.Date.AddDays(1);
+        for (int i = 0; i < 14 && !s.IsWorkDay(d); i++) d = d.AddDays(1);
+        await Tasks.SnoozeAsync(n.TaskId!.Value, d + start);
+        await Notifications.MarkReadAsync(n.Id);
+        UiSvc.Success("Đã tạm hoãn đến đầu giờ làm việc tiếp theo.");
+    }
+
+    [Inject] private SettingsService Settings { get; set; } = default!;
+
+    public void Dispose()
+    {
+        UiSvc.Changed -= OnUiChanged;
+        Bus.Published -= OnPublished;
+        Notifications.Changed -= OnNotificationsChanged;
+        _self?.Dispose();
+    }
+}

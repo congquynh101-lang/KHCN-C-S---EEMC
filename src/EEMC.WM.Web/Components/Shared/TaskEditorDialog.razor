@@ -1,0 +1,310 @@
+@implements IDisposable
+@inject UiService UiSvc
+@inject TaskService Tasks
+@inject CategoryService Categories
+@inject ProjectService Projects
+@inject SettingsService Settings
+@inject IClock Clock
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@if (_open)
+{
+    <div class="overlay">
+        <div class="dialog" @onkeydown="OnKey">
+            <div class="dialog-head">
+                <h2 style="margin:0">@(_isNew ? (_parentId.HasValue ? "Thêm công việc con" : "Thêm công việc mới") : "Cập nhật công việc")</h2>
+                <span class="muted">@_code</span>
+                <span class="spacer"></span>
+                <button class="btn ghost icon-only" @onclick="Close" title="Đóng (Esc)"><Icon Name="close" /></button>
+            </div>
+
+            <div class="card" style="padding:14px 16px">
+                <div class="muted" style="font-weight:600">THÔNG TIN BẮT BUỘC</div>
+                <label class="field"><span>Nội dung công việc *</span>
+                    <textarea id="task-title" class="input" rows="2" @bind="_m.Title" @bind:event="oninput"></textarea>
+                </label>
+                <div class="grid grid-2">
+                    <label class="field"><span>Ngày giờ nhận *</span>
+                        <input type="datetime-local" class="input" value="@Ui.ToInput(_received)" @onchange="e => _received = Ui.FromInput(e.Value?.ToString())" />
+                    </label>
+                    <div>
+                        <label class="field"><span>Hạn hoàn thành * <span class="tertiary">@(_due.HasValue ? Labels.TimeRemaining(_due.Value, Clock.Now) : "")</span></span>
+                            <input type="datetime-local" class="input" value="@Ui.ToInput(_due)" @onchange="e => { _due = Ui.FromInput(e.Value?.ToString()); Assess(); }" />
+                        </label>
+                        <div class="row mt-s">
+                            <button class="btn sm" @onclick='() => SetDue("today")'>Hôm nay</button>
+                            <button class="btn sm" @onclick='() => SetDue("tomorrow")'>Ngày mai</button>
+                            <button class="btn sm" @onclick='() => SetDue("3d")'>+3 ngày LV</button>
+                            <button class="btn sm" @onclick='() => SetDue("friday")'>Thứ Sáu này</button>
+                            <button class="btn sm" @onclick='() => SetDue("nextweek")'>Thứ Sáu tuần sau</button>
+                        </div>
+                    </div>
+                </div>
+                <label class="field"><span>Mức độ ưu tiên *</span></label>
+                <div class="chips">
+                    @foreach (var p in new[] { TaskPriority.Urgent, TaskPriority.High, TaskPriority.Normal, TaskPriority.Low })
+                    {
+                        <button class="chip @(_m.Priority == p ? "on" : "")" @onclick="() => { _m.Priority = p; Assess(); }">@Labels.Of(p)</button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_assessment))
+                {
+                    <div class="mt" style="background:var(--subtle);border-radius:8px;padding:8px 10px">
+                        <div class="small" style="font-weight:600">Đánh giá tự động</div>
+                        <div class="muted">@_assessment</div>
+                        @if (!string.IsNullOrEmpty(_suggestion)) { <div class="small c-orange">@_suggestion</div> }
+                    </div>
+                }
+            </div>
+
+            <details class="ext mt" open="@(!_isNew)">
+                <summary>Thông tin mở rộng (không bắt buộc)</summary>
+                <div class="ext-body">
+                    <div class="grid grid-2">
+                        <div>
+                            <label class="field"><span>Trạng thái</span>
+                                <select class="input" @bind="_m.Status">
+                                    @foreach (var s in Enum.GetValues<WorkTaskStatus>()) { <option value="@s">@Labels.Of(s)</option> }
+                                </select>
+                            </label>
+                            <label class="field"><span>Nhóm công việc</span>
+                                <select class="input" @bind="_categoryId">
+                                    <option value="0">(Chưa phân nhóm)</option>
+                                    @foreach (var c in _categories)
+                                    {
+                                        <option value="@c.Id">@(c.ParentId == null ? c.Name : "\u00a0\u00a0\u00a0\u00a0" + c.Name)</option>
+                                    }
+                                </select>
+                            </label>
+                            <label class="field"><span>Dự án KH&amp;CN</span>
+                                <select class="input" @bind="_projectId">
+                                    <option value="0">(Không gắn dự án)</option>
+                                    @foreach (var p in _projects) { <option value="@p.Id">@p.Code – @p.Name</option> }
+                                </select>
+                            </label>
+                            <label class="field"><span>Tên đề tài/dự án (ghi tự do)</span><input class="input" @bind="_m.ProjectName" /></label>
+                            <label class="field"><span>Người giao việc</span><input class="input" @bind="_m.AssignedBy" /></label>
+                            <label class="field"><span>Người thực hiện</span><input class="input" @bind="_m.Assignee" /></label>
+                            <label class="field"><span>Đơn vị phối hợp</span><input class="input" @bind="_m.Coordinator" /></label>
+                            @if (StatusGroups.IsWaiting(_m.Status))
+                            {
+                                <label class="field"><span>Ngày dự kiến nhận phản hồi (để nhắc đôn đốc)</span>
+                                    <input type="datetime-local" class="input" value="@Ui.ToInput(_m.ExpectedResponseAt)" @onchange="e => _m.ExpectedResponseAt = Ui.FromInput(e.Value?.ToString())" />
+                                </label>
+                            }
+                            <label class="field"><span>Kết quả cần bàn giao</span><textarea class="input" rows="2" @bind="_m.Deliverable"></textarea></label>
+                            <label class="field"><span>Nội dung cần xin ý kiến lãnh đạo</span><textarea class="input" rows="2" @bind="_m.LeaderOpinionNeeded"></textarea></label>
+                        </div>
+                        <div>
+                            <div class="grid grid-2">
+                                <label class="field"><span>Thời lượng dự kiến (giờ)</span>
+                                    <input class="input" @bind="_estimateText" @bind:event="oninput" @bind:after="Assess" placeholder="VD: 2 hoặc 1,5" />
+                                </label>
+                                <label class="field"><span>Trọng số (khi là việc con)</span>
+                                    <input type="number" min="0.1" step="0.5" class="input" @bind="_m.Weight" />
+                                </label>
+                            </div>
+                            <label class="field"><span>Bắt đầu theo kế hoạch</span>
+                                <input type="datetime-local" class="input" value="@Ui.ToInput(_m.PlannedStart)" @onchange="e => _m.PlannedStart = Ui.FromInput(e.Value?.ToString())" />
+                            </label>
+                            <label class="check mt"><input type="checkbox" @bind="_m.IsFixedTime" /> Có thời điểm thực hiện cố định (họp, làm việc với đoàn...)</label>
+                            <label class="field"><span>Tiến độ hoàn thành: @_m.Progress%</span>
+                                <input type="range" min="0" max="100" step="5" style="width:100%;accent-color:var(--accent)" @bind="_m.Progress" @bind:event="oninput" />
+                            </label>
+                            <div class="muted">Tiến độ 100% không tự chuyển sang Hoàn thành.</div>
+                            <label class="field"><span>Tình trạng hồ sơ</span>
+                                <select class="input" @bind="_m.DocumentStatus">
+                                    @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
+                                </select>
+                            </label>
+                            <label class="field"><span>Số văn bản liên quan</span><input class="input" @bind="_m.DocumentNumber" /></label>
+                            <label class="field"><span>Đường dẫn thư mục hồ sơ (mạng nội bộ)</span><input class="input" @bind="_m.FolderPath" placeholder="\\server\HoSo\..." /></label>
+                            <label class="field"><span>Ghi chú</span><textarea class="input" rows="3" @bind="_m.Notes"></textarea></label>
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            @if (!string.IsNullOrEmpty(_error)) { <div class="validation">@_error</div> }
+            <div class="dialog-foot">
+                @if (!_isNew)
+                {
+                    <button class="btn ghost" @onclick="OpenDetail"><Icon Name="file" Class="sm" />Mở trang chi tiết</button>
+                    <span class="spacer"></span>
+                }
+                <button class="btn" @onclick="Close">Hủy (Esc)</button>
+                <button class="btn primary" @onclick="SaveAsync" disabled="@_busy">Lưu công việc (Ctrl+Enter)</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open, _isNew, _busy;
+    private WorkTask _m = new();
+    private WorkTask _original = new();
+    private string _code = "";
+    private DateTime? _received, _due;
+    private int _categoryId, _projectId;
+    private int? _parentId;
+    private string _estimateText = "";
+    private string? _error, _assessment, _suggestion;
+    private List<Category> _categories = new();
+    private List<Project> _projects = new();
+
+    protected override void OnInitialized() => UiSvc.EditorRequested += OnRequested;
+
+    private void OnRequested(EditorRequest r) => InvokeAsync(() => OpenAsync(r));
+
+    private async Task OpenAsync(EditorRequest r)
+    {
+        _error = null;
+        _categories = await Categories.GetAllAsync();
+        _projects = await Projects.GetActiveListAsync();
+        if (r.TaskId is int id)
+        {
+            var t = await Tasks.GetAsync(id);
+            if (t == null) { UiSvc.Error("Không tìm thấy công việc (có thể đã bị xóa)."); return; }
+            _original = t;
+            _m = Copy(t);
+            _isNew = false;
+            _code = t.Code;
+            _received = t.ReceivedAt;
+            _due = t.DueAt;
+            _categoryId = t.CategoryId ?? 0;
+            _projectId = t.ProjectId ?? 0;
+            _parentId = t.ParentId;
+            _estimateText = t.EstimatedHours?.ToString("0.##") ?? "";
+        }
+        else
+        {
+            _original = new WorkTask();
+            _m = new WorkTask { Priority = TaskPriority.Normal, Weight = 1 };
+            _isNew = true;
+            _code = "";
+            _received = Clock.Now;
+            _due = r.DueDate.HasValue ? r.DueDate.Value.Date + DefaultDueTime : null;
+            _categoryId = 0;
+            _projectId = r.ProjectId ?? 0;
+            _parentId = r.ParentId;
+            _estimateText = "";
+        }
+        _open = true;
+        Assess();
+        StateHasChanged();
+        await Task.Delay(50);
+        try { await JS.InvokeVoidAsync("eemc.focus", "task-title"); } catch { }
+    }
+
+    private static WorkTask Copy(WorkTask t)
+    {
+        var c = t.CloneForCopy();
+        c.Id = t.Id; c.Code = t.Code; c.Status = t.Status; c.Progress = t.Progress; c.PlannedStart = t.PlannedStart;
+        c.DocumentStatus = t.DocumentStatus; c.DocumentNumber = t.DocumentNumber; c.ExpectedResponseAt = t.ExpectedResponseAt;
+        c.CreatedAt = t.CreatedAt;
+        return c;
+    }
+
+    private TimeSpan DefaultDueTime => Settings.Current.WorkPeriods.Count > 0 ? Settings.Current.WorkPeriods.Max(p => p.End) : new TimeSpan(17, 0, 0);
+
+    private void SetDue(string mode)
+    {
+        var now = Clock.Now;
+        var s = Settings.Current;
+        DateTime Next(DateTime d) { d = d.AddDays(1); for (int i = 0; i < 14 && !s.IsWorkDay(d); i++) d = d.AddDays(1); return d; }
+        var target = mode switch
+        {
+            "tomorrow" => Next(now.Date),
+            "3d" => Next(Next(Next(now.Date))),
+            "friday" => now.Date.AddDays(((int)DayOfWeek.Friday - (int)now.DayOfWeek + 7) % 7),
+            "nextweek" => TaskService.StartOfWeek(now).AddDays(11),
+            _ => now.Date
+        };
+        _due = target + DefaultDueTime;
+        Assess();
+    }
+
+    private bool TryEstimate(out double? v)
+    {
+        v = null;
+        var s = (_estimateText ?? "").Trim().Replace(',', '.');
+        if (s.Length == 0) return true;
+        if (double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) && d >= 0) { v = d; return true; }
+        return false;
+    }
+
+    private WorkTask Build()
+    {
+        TryEstimate(out var est);
+        var t = Copy(_m);
+        t.Id = _original.Id;
+        t.Code = _original.Code;
+        t.ReceivedAt = _received ?? default;
+        t.DueAt = _due ?? default;
+        t.Title = (_m.Title ?? "").Trim();
+        t.CategoryId = _categoryId == 0 ? null : _categoryId;
+        t.ProjectId = _projectId == 0 ? null : _projectId;
+        t.ParentId = _parentId;
+        t.EstimatedHours = est;
+        t.Weight = _m.Weight > 0 ? _m.Weight : 1;
+        t.CreatedAt = _isNew ? Clock.Now : _original.CreatedAt;
+        foreach (var p in new Action[] { () => t.ProjectName = Clean(t.ProjectName), () => t.AssignedBy = Clean(t.AssignedBy), () => t.Assignee = Clean(t.Assignee),
+                     () => t.Coordinator = Clean(t.Coordinator), () => t.Deliverable = Clean(t.Deliverable), () => t.LeaderOpinionNeeded = Clean(t.LeaderOpinionNeeded),
+                     () => t.Notes = Clean(t.Notes), () => t.FolderPath = Clean(t.FolderPath), () => t.DocumentNumber = Clean(t.DocumentNumber) }) p();
+        return t;
+    }
+
+    private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private void Assess()
+    {
+        if (!_due.HasValue || !_received.HasValue) { _assessment = null; _suggestion = null; return; }
+        var t = Build();
+        if (t.Id == 0) t.Id = -1;
+        var a = new PriorityEngine(Settings.Current).Assess(t, Clock.Now);
+        _assessment = $"{Labels.Of(a.Urgency)} • {Labels.Of(a.Quadrant)} • Điểm {a.Score:0} — {a.Explanation}";
+        _suggestion = a.SuggestionDiffers ? $"Hệ thống đề xuất mức \"{Labels.Of(a.SuggestedPriority)}\" (chỉ tham khảo, không tự đổi lựa chọn của bạn)." : null;
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && e.CtrlKey) await SaveAsync();
+        else if (e.Key == "Escape") Close();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy) return;
+        _error = null;
+        if (!TryEstimate(out _)) { _error = "Thời lượng dự kiến phải là số giờ (ví dụ 2 hoặc 1,5)."; return; }
+        var t = Build();
+        var errors = TaskValidator.Validate(t);
+        if (errors.Count > 0) { _error = string.Join("\n", errors); return; }
+        bool completing = t.Status == WorkTaskStatus.Completed && (_isNew || _original.Status != WorkTaskStatus.Completed);
+        if (completing && !await UiSvc.ConfirmAsync($"Xác nhận ghi nhận công việc đã HOÀN THÀNH?\n{t.Title}", "Hoàn thành")) return;
+        _busy = true;
+        try
+        {
+            WorkTask saved;
+            if (_isNew && _parentId.HasValue) saved = await Tasks.CreateSubtaskAsync(_parentId.Value, t);
+            else if (_isNew) saved = await Tasks.CreateAsync(t);
+            else saved = await Tasks.UpdateAsync(t);
+            UiSvc.Success(_isNew ? $"Đã thêm {saved.Code}" : $"Đã cập nhật {saved.Code}");
+            _open = false;
+        }
+        catch (ValidationException ex) { _error = string.Join("\n", ex.Errors); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được công việc"); }
+        finally { _busy = false; }
+    }
+
+    private void OpenDetail()
+    {
+        _open = false;
+        Nav.NavigateTo($"/tasks/{_original.Id}");
+    }
+
+    private void Close() => _open = false;
+
+    public void Dispose() => UiSvc.EditorRequested -= OnRequested;
+}

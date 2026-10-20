@@ -1,0 +1,80 @@
+@page "/account/login"
+@attribute [AllowAnonymous]
+@layout Layout.AuthLayout
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject UserService Users
+@inject NavigationManager Nav
+
+<PageTitle>Đăng nhập – EEMC Work Manager</PageTitle>
+<h1 style="font-size:20px">Đăng nhập</h1>
+
+<EditForm Model="Input" method="post" OnValidSubmit="LoginAsync" FormName="login">
+    <label class="field"><span>Tên đăng nhập</span>
+        <InputText @bind-Value="Input.UserName" class="input" autocomplete="username" autofocus />
+    </label>
+    <label class="field"><span>Mật khẩu</span>
+        <InputText type="password" @bind-Value="Input.Password" class="input" autocomplete="current-password" />
+    </label>
+    <label class="check mt"><InputCheckbox @bind-Value="Input.Remember" /> Ghi nhớ đăng nhập trên máy này</label>
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="validation">@_error</div>
+    }
+    <button type="submit" class="btn primary mt" style="width:100%;min-height:38px">Đăng nhập</button>
+</EditForm>
+<p class="muted mt">Quên mật khẩu: xem mục "Khôi phục mật khẩu" trong hướng dẫn quản trị.</p>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private LoginInput Input { get; set; } = new();
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    private string? _error;
+
+    public sealed class LoginInput
+    {
+        public string UserName { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool Remember { get; set; } = true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpMethods.IsGet(HttpContext.Request.Method) && !await Users.HasAnyUserAsync())
+            Nav.NavigateTo("/account/setup");
+    }
+
+    private async Task LoginAsync()
+    {
+        var (result, user) = await Users.LoginAsync(Input.UserName, Input.Password);
+        switch (result)
+        {
+            case LoginResult.NoUsers:
+                Nav.NavigateTo("/account/setup");
+                return;
+            case LoginResult.LockedOut:
+                _error = $"Tài khoản tạm khóa {UserService.LockoutTime.TotalMinutes:0} phút do nhập sai mật khẩu nhiều lần.";
+                return;
+            case LoginResult.InvalidCredentials:
+                _error = "Tên đăng nhập hoặc mật khẩu không đúng.";
+                return;
+        }
+        await SignInAsync(HttpContext, user!, Input.Remember);
+        var target = !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//") && !ReturnUrl.StartsWith("/account") ? ReturnUrl : "/";
+        Nav.NavigateTo(target);
+    }
+
+    public static async Task SignInAsync(HttpContext ctx, AppUser user, bool persistent)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.DisplayName),
+            new("username", user.UserName),
+        };
+        if (user.IsAdmin) claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
+        await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal,
+            new AuthenticationProperties { IsPersistent = persistent, AllowRefresh = true });
+    }
+}

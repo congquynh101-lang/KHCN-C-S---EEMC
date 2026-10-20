@@ -1,0 +1,56 @@
+# Triển khai liên tục lên máy chủ IIS nội bộ EEMC
+# - Kiểm thử + đóng gói chạy trên máy ảo của GitHub.
+# - Bước triển khai chạy trên "self-hosted runner" cài tại máy chủ IIS (nhãn: eemc-iis),
+#   nên máy chủ KHÔNG cần mở cổng từ Internet vào; runner tự kết nối ra GitHub.
+# - Môi trường "production" có thể bật "Required reviewers" để phải bấm duyệt trước khi cập nhật.
+name: Triển khai lên máy chủ IIS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Kiểm thử (dừng nếu có lỗi)
+        run: dotnet test tests/EEMC.WM.Tests -c Release
+      - name: Đóng gói bản web
+        run: dotnet publish src/EEMC.WM.Web -c Release -o artifacts/web -p:Version=2.0.${{ github.run_number }}
+      - name: Nén gói
+        shell: pwsh
+        run: Compress-Archive -Path artifacts/web/* -DestinationPath artifacts/eemc-web.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eemc-web-zip
+          path: artifacts/eemc-web.zip
+
+  deploy:
+    needs: build
+    runs-on: [ self-hosted, windows, eemc-iis ]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: deploy
+      - uses: actions/download-artifact@v4
+        with:
+          name: eemc-web-zip
+          path: ${{ runner.temp }}
+      - name: Cập nhật website (sao lưu → bảo trì → chép → kiểm tra → tự quay lại nếu lỗi)
+        shell: powershell
+        run: |
+          .\deploy\deploy-iis.ps1 -Package "${{ runner.temp }}\eemc-web.zip" `
+            -SiteDir "${{ vars.EEMC_SITE_DIR || 'C:\inetpub\eemc-workmanager' }}" `
+            -DataDir "${{ vars.EEMC_DATA_DIR || 'D:\EEMC-WorkManager-Data' }}" `
+            -AppPool "${{ vars.EEMC_APP_POOL || 'EEMC-WorkManager' }}" `
+            -HealthUrl "${{ vars.EEMC_HEALTH_URL || 'http://localhost/health' }}"

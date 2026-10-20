@@ -1,0 +1,116 @@
+@page "/reports"
+@inherits LivePage
+@inject ReportService ReportSvc
+
+<PageTitle>Báo cáo – EEMC Work Manager</PageTitle>
+<div class="page-head no-print">
+    <h1>Báo cáo công việc</h1>
+</div>
+
+<div class="card mb no-print">
+    <div class="row">
+        <div class="seg">
+            <button class="@(_kind == ReportKind.Daily ? "on" : "")" @onclick="() => SetKind(ReportKind.Daily)">Ngày</button>
+            <button class="@(_kind == ReportKind.Weekly ? "on" : "")" @onclick="() => SetKind(ReportKind.Weekly)">Tuần</button>
+            <button class="@(_kind == ReportKind.Monthly ? "on" : "")" @onclick="() => SetKind(ReportKind.Monthly)">Tháng</button>
+        </div>
+        @if (_kind == ReportKind.Monthly)
+        {
+            <input type="month" class="input" style="width:auto" value="@_date.ToString("yyyy-MM")" @onchange="e => SetMonth(e.Value?.ToString())" />
+        }
+        else
+        {
+            <input type="date" class="input" style="width:auto" value="@Ui.ToDateInput(_date)" @onchange="e => { _date = Ui.FromInput(e.Value?.ToString()) ?? Now.Date; _doc = null; }" />
+        }
+        <button class="btn primary" @onclick="BuildAsync"><Icon Name="report" Class="sm" />Tổng hợp báo cáo</button>
+    </div>
+    <details class="ext mt">
+        <summary>Ý kiến bổ sung (tùy chọn) — khó khăn, vướng mắc, kiến nghị do bạn tự nhập</summary>
+        <div class="ext-body grid grid-2">
+            <label class="field"><span>Khó khăn, vướng mắc</span><textarea class="input" rows="4" @bind="_notes.Difficulties"></textarea></label>
+            <label class="field"><span>Kiến nghị, đề xuất</span><textarea class="input" rows="4" @bind="_notes.Proposals"></textarea></label>
+        </div>
+    </details>
+    <div class="muted mt-s">Báo cáo chỉ tổng hợp từ dữ liệu đã ghi nhận trong phần mềm; không tự tạo kết quả hay suy diễn công việc đã hoàn thành.</div>
+</div>
+
+@if (_doc != null)
+{
+    <div class="row mb no-print">
+        <button class="btn" @onclick="ToWord"><Icon Name="download" Class="sm" />Word (.docx)</button>
+        <button class="btn" @onclick="ToExcel"><Icon Name="download" Class="sm" />Excel (.xlsx)</button>
+        <button class="btn" @onclick="ToPdf"><Icon Name="download" Class="sm" />PDF</button>
+        <button class="btn ghost" onclick="window.print()">In</button>
+    </div>
+    <div class="report">
+        <div class="head">
+            <div>@_doc.Organization<br />@_doc.Unit</div>
+            <div>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<br /><u>Độc lập – Tự do – Hạnh phúc</u></div>
+        </div>
+        <div style="text-align:right;font-style:italic;margin-top:8px">@_doc.PlaceDate</div>
+        <div class="title">@_doc.Title</div>
+        <div style="text-align:center;font-style:italic">@_doc.Period</div>
+        @foreach (var s in _doc.Sections)
+        {
+            <h3>@s.Heading</h3>
+            @foreach (var p in s.Paragraphs) { <p style="margin:4px 0;text-indent:1cm;text-align:justify">@p</p> }
+            @if (s.Table != null && s.Table.Rows.Count > 0)
+            {
+                <table>
+                    <thead><tr>@foreach (var c in s.Table.Columns) { <th>@c</th> }</tr></thead>
+                    <tbody>@foreach (var r in s.Table.Rows) { <tr>@foreach (var c in r) { <td>@c</td> }</tr> }</tbody>
+                </table>
+            }
+            else if (s.Table != null && !string.IsNullOrEmpty(s.EmptyText)) { <p style="margin:4px 0;text-indent:1cm;font-style:italic">@s.EmptyText</p> }
+        }
+        @if (!string.IsNullOrWhiteSpace(_doc.Author))
+        {
+            <div style="text-align:right;font-weight:700;margin-top:24px">NGƯỜI LẬP<br /><br /><br />@_doc.Author</div>
+        }
+    </div>
+}
+
+@code {
+    private ReportKind _kind = ReportKind.Weekly;
+    private DateTime _date;
+    private ReportDocument? _doc;
+    private readonly ReportNotes _notes = new();
+
+    protected override Task LoadAsync()
+    {
+        if (_date == default) _date = Now.Date;
+        return Task.CompletedTask;
+    }
+
+    private void SetKind(ReportKind k) { _kind = k; _doc = null; }
+
+    private void SetMonth(string? v)
+    {
+        if (DateTime.TryParseExact(v, "yyyy-MM", null, System.Globalization.DateTimeStyles.None, out var d)) { _date = d; _doc = null; }
+    }
+
+    private async Task BuildAsync()
+    {
+        try
+        {
+            _doc = _kind switch
+            {
+                ReportKind.Daily => await ReportSvc.DailyAsync(_date, _notes),
+                ReportKind.Weekly => await ReportSvc.WeeklyAsync(_date, _notes),
+                _ => await ReportSvc.MonthlyAsync(_date.Year, _date.Month, _notes)
+            };
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tổng hợp được báo cáo"); }
+    }
+
+    private async Task Export(Func<ReportDocument, byte[]> f, string ext)
+    {
+        if (_doc == null) return;
+        try { await UiSvc.DownloadAsync(f(_doc), $"{_doc.FileBaseName}.{ext}"); }
+        catch (Exception ex) { UiSvc.Error(ex, $"Không xuất được tệp .{ext}"); }
+    }
+
+    private Task ToWord() => Export(ReportExporters.ToWord, "docx");
+    private Task ToExcel() => Export(ReportExporters.ToExcel, "xlsx");
+    private Task ToPdf() => Export(ReportExporters.ToPdf, "pdf");
+}

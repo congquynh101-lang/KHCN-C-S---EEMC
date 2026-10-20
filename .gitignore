@@ -1,0 +1,29 @@
+## Build
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+*.user
+.vs/
+
+## Dữ liệu – KHÔNG đưa lên Git
+App_Data/
+*.db
+*.db-wal
+*.db-shm
+design.db
+**/keys/
+
+## Cấu hình riêng của máy chủ
+appsettings.Production.json
+
+## Gói cài đặt (đăng ở GitHub Releases, không để trong mã nguồn)
+BanCaiDat/
+*.zip
+*.7z
+
+## Công cụ cục bộ, thông tin chạy thử
+.claude/
+tools/DEV-TEST-ACCOUNT.md
+*.log

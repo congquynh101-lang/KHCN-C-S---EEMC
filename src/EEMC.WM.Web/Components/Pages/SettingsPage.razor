@@ -1,0 +1,263 @@
+@page "/settings"
+@inherits LivePage
+@inject CategoryService Categories
+@inject BackupService Backup
+@inject UserService Users
+@inject DesktopImportService Importer
+@inject EEMC.WM.Data.Infrastructure.AppPaths Paths
+
+<PageTitle>Cài đặt – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Cài đặt</h1>
+    <span class="spacer"></span>
+    <button class="btn primary" @onclick="SaveAsync">Lưu cài đặt</button>
+</div>
+
+@if (_s != null)
+{
+<div class="grid grid-2">
+    <div class="stack">
+        <div class="card">
+            <h2>Giờ làm việc, ngày làm việc</h2>
+            @for (int i = 0; i < _periods.Count; i++)
+            {
+                var idx = i;
+                <div class="row mb-s">
+                    <span>Từ</span><input type="time" class="input" style="width:auto" @bind="_periods[idx].Start" />
+                    <span>đến</span><input type="time" class="input" style="width:auto" @bind="_periods[idx].End" />
+                    <button class="btn sm ghost danger" @onclick="() => _periods.RemoveAt(idx)">Xóa</button>
+                </div>
+            }
+            <button class="btn sm" @onclick='() => _periods.Add(new Period { Start = new TimeOnly(13, 0), End = new TimeOnly(17, 0) })'>+ Thêm khung giờ</button>
+            <div class="field"><span>Ngày làm việc trong tuần</span></div>
+            <div class="row">
+                @foreach (var d in new[] { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday })
+                {
+                    var day = d;
+                    <label class="check"><input type="checkbox" checked="@_s.WorkDays.Contains(day)" @onchange="e => ToggleDay(day, (bool)e.Value!)" /> @Labels.DayOfWeekVi(day)</label>
+                }
+            </div>
+            <div class="field"><span>Ngày nghỉ lễ / nghỉ cá nhân</span></div>
+            <div class="row">
+                <input type="date" class="input" style="width:auto" @bind="_newHoliday" />
+                <button class="btn sm" @onclick="AddHoliday">Thêm ngày nghỉ</button>
+            </div>
+            <div class="row mt-s">
+                @foreach (var h in _s.Holidays.OrderBy(h => h))
+                {
+                    var hd = h;
+                    <span class="badge b-gray">@hd.ToString("dd/MM/yyyy") <a href="javascript:void(0)" @onclick="() => _s.Holidays.Remove(hd)">✕</a></span>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Nhắc việc</h2>
+            @foreach (var o in _s.ReminderOffsets.OrderByDescending(o => o.Minutes))
+            {
+                <label class="check" style="display:flex;margin:4px 0"><input type="checkbox" @bind="o.Enabled" /> @o.Label</label>
+            }
+            <div class="row mt-s">
+                <label class="check"><input type="checkbox" @bind="_s.RemindWhenOverdue" /> Nhắc khi quá hạn, lặp lại mỗi</label>
+                <input type="number" min="1" class="input" style="width:70px" @bind="_s.OverdueRepeatHours" /> giờ
+            </div>
+            <label class="check" style="display:flex;margin-top:6px"><input type="checkbox" @bind="_s.RemindFollowUp" /> Nhắc đôn đốc việc chờ phản hồi từ ngày dự kiến phản hồi</label>
+            <div class="muted mt-s">Máy chủ kiểm tra nhắc việc mỗi phút, kể cả khi không mở trình duyệt. Khi trình duyệt đang mở, bấm chuông → "Bật thông báo" để nhận thông báo của Windows/điện thoại.</div>
+        </div>
+
+        <div class="card">
+            <h2>Ưu tiên, lập lịch, báo cáo</h2>
+            <div class="grid grid-2">
+                <label class="field"><span>Thời lượng ước tính mặc định (giờ)</span><input type="number" step="0.5" min="0.5" class="input" @bind="_s.DefaultEstimateHours" /></label>
+                <label class="field"><span>"Sắp đến hạn" khi còn (ngày)</span><input type="number" min="1" max="30" class="input" @bind="_s.DueSoonDays" /></label>
+            </div>
+            <label class="field"><span>Đơn vị lập báo cáo (dòng 2 khối tiêu đề)</span><input class="input" @bind="_s.ReportUnit" /></label>
+            <div class="grid grid-2">
+                <label class="field"><span>Người lập báo cáo</span><input class="input" @bind="_s.ReportAuthor" /></label>
+                <label class="field"><span>Địa danh</span><input class="input" @bind="_s.ReportPlace" /></label>
+            </div>
+        </div>
+    </div>
+
+    <div class="stack">
+        <div class="card">
+            <h2>Danh mục nhóm công việc</h2>
+            <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+                @foreach (var c in _cats)
+                {
+                    <div class="row nowrap" style="padding:5px 10px;cursor:pointer;@(_selCat?.Id == c.Id ? "background:var(--selected)" : "")" @onclick="() => { _selCat = c; _catName = c.Name; }">
+                        <span style="@(c.ParentId == null ? "font-weight:600" : "padding-left:18px")">@c.Name</span>
+                    </div>
+                }
+            </div>
+            <label class="field"><span>Tên nhóm / mục</span><input class="input" @bind="_catName" /></label>
+            <div class="row mt-s">
+                <button class="btn sm" @onclick="() => CatAction(1)">Thêm nhóm mới</button>
+                <button class="btn sm" @onclick="() => CatAction(2)">Thêm mục vào nhóm đang chọn</button>
+                <button class="btn sm" @onclick="() => CatAction(3)">Đổi tên</button>
+                <button class="btn sm danger" @onclick="() => CatAction(4)">Ngừng sử dụng</button>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Sao lưu, phục hồi, chuyển dữ liệu</h2>
+            <div class="muted">Dữ liệu trên máy chủ: <code>@Paths.DatabasePath</code></div>
+            <div class="row mt">
+                <button class="btn primary" @onclick="BackupNow"><Icon Name="download" Class="sm" />Sao lưu ngay</button>
+                <label class="check"><input type="checkbox" @bind="_s.AutoBackupDaily" /> Tự sao lưu mỗi ngày, giữ</label>
+                <input type="number" min="1" class="input" style="width:70px" @bind="_s.BackupKeepCount" /> bản
+            </div>
+            <div style="max-height:180px;overflow:auto" class="mt-s">
+                @foreach (var b in _backups.Take(50))
+                {
+                    <div class="row small" style="padding:3px 0"><span class="spacer">@b.FileName</span><span class="tertiary">@b.SizeText</span><a href="/backups/@b.FileName">Tải về</a></div>
+                }
+            </div>
+            <h3 class="mt">Nhập dữ liệu từ bản desktop (Windows)</h3>
+            <div class="muted">Trên máy cài bản desktop: Cài đặt → "Sao lưu ngay", rồi chọn tệp <code>EEMC-WM-....db</code> tại đây. Nhập nhiều lần không bị nhân đôi; bản sửa mới hơn được giữ.</div>
+            <div class="row mt-s">
+                <label class="btn" style="cursor:pointer"><Icon Name="upload" Class="sm" />Chọn tệp .db để nhập
+                    <InputFile OnChange="ImportAsync" accept=".db" style="display:none" />
+                </label>
+                @if (_importing) { <span class="muted">Đang nhập...</span> }
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Tài khoản</h2>
+            <div class="grid grid-3">
+                <label class="field"><span>Mật khẩu hiện tại</span><input type="password" class="input" @bind="_pwOld" autocomplete="current-password" /></label>
+                <label class="field"><span>Mật khẩu mới</span><input type="password" class="input" @bind="_pwNew" autocomplete="new-password" /></label>
+                <label class="field"><span>Nhập lại</span><input type="password" class="input" @bind="_pwNew2" autocomplete="new-password" /></label>
+            </div>
+            <button class="btn mt-s" @onclick="ChangePassword">Đổi mật khẩu</button>
+        </div>
+
+        <div class="card">
+            <h2>Phiên bản</h2>
+            <div class="muted">EEMC Work Manager Web @(typeof(Program).Assembly.GetName().Version?.ToString(3)) · Dữ liệu: @Paths.DataDir</div>
+        </div>
+    </div>
+</div>
+}
+
+@code {
+    private sealed class Period { public TimeOnly Start { get; set; } public TimeOnly End { get; set; } }
+
+    [CascadingParameter] private Task<AuthenticationState> AuthState { get; set; } = default!;
+    private EEMC.WM.Core.Settings.WorkSettings? _s;
+    private List<Period> _periods = new();
+    private DateTime? _newHoliday;
+    private List<Category> _cats = new();
+    private Category? _selCat;
+    private string _catName = "", _pwOld = "", _pwNew = "", _pwNew2 = "";
+    private List<BackupInfo> _backups = new();
+    private bool _importing;
+
+    protected override async Task LoadAsync()
+    {
+        if (_s == null)
+        {
+            _s = Settings.CloneCurrent();
+            _periods = _s.WorkPeriods.OrderBy(p => p.Start).Select(p => new Period { Start = TimeOnly.FromTimeSpan(p.Start), End = TimeOnly.FromTimeSpan(p.End) }).ToList();
+        }
+        _cats = await Categories.GetAllAsync();
+        _backups = Backup.ListBackups();
+    }
+
+    private void ToggleDay(DayOfWeek d, bool on)
+    {
+        if (on && !_s!.WorkDays.Contains(d)) _s.WorkDays.Add(d);
+        if (!on) _s!.WorkDays.Remove(d);
+    }
+
+    private void AddHoliday()
+    {
+        if (_newHoliday is { } d && !_s!.Holidays.Any(h => h.Date == d.Date)) _s.Holidays.Add(d.Date);
+        _newHoliday = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _s!.WorkPeriods = _periods.Select(p => new EEMC.WM.Core.Settings.WorkPeriod(p.Start.ToTimeSpan(), p.End.ToTimeSpan())).ToList();
+        try
+        {
+            await Settings.SaveAsync(_s);
+            _s = null;
+            await SafeLoadAsync();
+            UiSvc.Success("Đã lưu cài đặt.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được cài đặt"); }
+    }
+
+    private async Task CatAction(int a)
+    {
+        try
+        {
+            switch (a)
+            {
+                case 1: await Categories.AddAsync(_catName, null); break;
+                case 2:
+                    if (_selCat == null) { UiSvc.Show("Hãy chọn nhóm (hoặc một mục trong nhóm)."); return; }
+                    await Categories.AddAsync(_catName, _selCat.ParentId ?? _selCat.Id); break;
+                case 3:
+                    if (_selCat == null) { UiSvc.Show("Hãy chọn nhóm/mục cần đổi tên."); return; }
+                    await Categories.RenameAsync(_selCat.Id, _catName); break;
+                case 4:
+                    if (_selCat == null) { UiSvc.Show("Hãy chọn nhóm/mục."); return; }
+                    if (!await UiSvc.ConfirmAsync($"Ngừng sử dụng \"{_selCat.Name}\"? Công việc đã gắn vẫn giữ nguyên.", "Ngừng sử dụng", danger: true)) return;
+                    await Categories.DeactivateAsync(_selCat.Id); break;
+            }
+            _cats = await Categories.GetAllAsync();
+            UiSvc.Success("Đã cập nhật danh mục.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không cập nhật được danh mục"); }
+    }
+
+    private async Task BackupNow()
+    {
+        try
+        {
+            var b = await Backup.BackupNowAsync();
+            _backups = Backup.ListBackups();
+            UiSvc.Success($"Đã sao lưu: {b.FileName}");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Sao lưu thất bại"); }
+    }
+
+    private async Task ImportAsync(InputFileChangeEventArgs e)
+    {
+        _importing = true;
+        var tmp = Path.Combine(Paths.DataDir, $"upload-{Guid.NewGuid():N}.db");
+        try
+        {
+            await using (var fs = File.Create(tmp))
+            await using (var s = e.File.OpenReadStream(500L * 1024 * 1024))
+                await s.CopyToAsync(fs);
+            await Backup.BackupNowAsync(suffix: "-truoc-nhap-desktop");
+            var r = await Importer.ImportAsync(tmp);
+            UiSvc.Success($"Đã nhập dữ liệu desktop: {r.Changes} thay đổi" + (r.CodesRenamed > 0 ? $", đổi {r.CodesRenamed} mã trùng" : "") + ".");
+            Tasks.NotifyExternalChange();
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không nhập được dữ liệu desktop"); }
+        finally
+        {
+            _importing = false;
+            try { File.Delete(tmp); } catch { }
+        }
+    }
+
+    private async Task ChangePassword()
+    {
+        if (_pwNew != _pwNew2) { UiSvc.Show("Hai lần nhập mật khẩu mới không khớp.", ToastKind.Warning); return; }
+        var user = (await AuthState).User;
+        if (!int.TryParse(user.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)) return;
+        try
+        {
+            await Users.ChangePasswordAsync(id, _pwOld, _pwNew);
+            _pwOld = _pwNew = _pwNew2 = "";
+            UiSvc.Success("Đã đổi mật khẩu.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không đổi được mật khẩu"); }
+    }
+}

@@ -1,0 +1,149 @@
+@page "/"
+@inherits LivePage
+@inject DashboardService DashboardSvc
+
+<PageTitle>Tổng quan – EEMC Work Manager</PageTitle>
+
+<div class="page-head">
+    <div>
+        <div class="muted">@Greeting — @Labels.DayOfWeekVi(Now.DayOfWeek), @Now.ToString("dd/MM/yyyy")</div>
+        <h1>Tổng quan điều hành công việc</h1>
+    </div>
+</div>
+
+@if (_stats != null)
+{
+    <div class="grid grid-4 mb">
+        @foreach (var k in _kpis)
+        {
+            <a class="card kpi" href="@k.Link" style="text-decoration:none" title="@k.Hint">
+                <div class="kpi-icon b-@k.Color"><Icon Name="@k.Icon" Class="lg" /></div>
+                <div style="min-width:0">
+                    <div class="kpi-value">@k.Value</div>
+                    <div class="kpi-label ellipsis">@k.Label</div>
+                </div>
+            </a>
+        }
+    </div>
+
+    <div class="grid grid-main">
+        <div class="card">
+            <div class="card-head">
+                <h2 class="c-blue">5 CÔNG VIỆC CẦN ƯU TIÊN XỬ LÝ HÔM NAY</h2>
+                <span class="spacer"></span>
+                <a class="btn ghost sm" href="/today">Xem toàn bộ thứ tự xử lý →</a>
+            </div>
+            @if (_top.Count == 0)
+            {
+                <div class="empty">
+                    Không có công việc nào đang chờ bạn trực tiếp xử lý.
+                    <div class="mt"><button class="btn primary" @onclick="() => OpenEditor()"><Icon Name="plus" Class="sm" />Thêm công việc</button></div>
+                </div>
+            }
+            @foreach (var a in _top)
+            {
+                <TaskCard Item="a.Task" Assessment="a" />
+            }
+        </div>
+
+        <div class="stack">
+            <div class="card">
+                <h2>Tỷ lệ hoàn thành đúng hạn</h2>
+                <div class="row">
+                    <div class="kpi-value c-green">@(_stats.OnTimeRate.HasValue ? _stats.OnTimeRate.Value.ToString("P0") : "—")</div>
+                    <div style="margin-left:18px">
+                        <div class="muted">Thời gian xử lý trung bình</div>
+                        <b>@(_stats.AvgLeadDays.HasValue ? $"{_stats.AvgLeadDays.Value:0.#} ngày" : "—")</b>
+                    </div>
+                </div>
+                <div class="muted mt-s">
+                    @(_stats.CompletedLast8Weeks == 0 ? "Chưa có công việc hoàn thành trong 8 tuần gần nhất" : $"{_stats.CompletedOnTimeLast8Weeks}/{_stats.CompletedLast8Weeks} công việc hoàn thành đúng hạn (8 tuần)")
+                </div>
+            </div>
+            <div class="card">
+                <h2>Chưa hoàn thành theo trạng thái</h2>
+                @{ var maxS = Math.Max(1, _stats.ByStatus.Max(p => p.Value)); }
+                @foreach (var p in _stats.ByStatus)
+                {
+                    <div class="bar-row">
+                        <span class="ellipsis">@p.Label</span>
+                        <div class="bar-track"><div class="bar bg-@(StatusColorKey(p.Key))" style="width:@Ui.Pc(Pct(p.Value, maxS))"></div></div>
+                        <b class="right">@p.Value</b>
+                    </div>
+                }
+            </div>
+            <div class="card">
+                <h2>Chưa hoàn thành theo nhóm nghiệp vụ</h2>
+                @if (_stats.ByCategory.Count == 0) { <div class="empty">Chưa có dữ liệu.</div> }
+                @{ var maxC = Math.Max(1, _stats.ByCategory.Select(p => p.Value).DefaultIfEmpty(0).Max()); }
+                @foreach (var p in _stats.ByCategory)
+                {
+                    <div class="bar-row">
+                        <span class="ellipsis" title="@p.Label">@p.Label</span>
+                        <div class="bar-track"><div class="bar bg-blue" style="width:@Ui.Pc(Pct(p.Value, maxC))"></div></div>
+                        <b class="right">@p.Value</b>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="card mt">
+        <div class="card-head">
+            <h2>Nhận – hoàn thành – tồn đọng theo tuần (8 tuần gần nhất)</h2>
+            <span class="spacer"></span>
+            <div class="legend"><span><i class="bg-blue"></i>Tiếp nhận</span><span><i class="bg-green"></i>Hoàn thành</span><span class="c-orange">Tồn đọng cuối tuần</span></div>
+        </div>
+        @{ var maxW = Math.Max(1, _stats.Weekly.Select(w => Math.Max(w.Received, w.Completed)).DefaultIfEmpty(0).Max()); }
+        <div class="weeks">
+            @foreach (var w in _stats.Weekly)
+            {
+                <div class="week" title="Tuần từ @w.Label: nhận @w.Received, hoàn thành @w.Completed, tồn @w.Backlog">
+                    <span class="c-orange">Tồn @w.Backlog</span>
+                    <div class="cols">
+                        <div class="col bg-blue" style="height:@Ui.Px(Math.Max(w.Received > 0 ? 3 : 0, w.Received * 120.0 / maxW))"></div>
+                        <div class="col bg-green" style="height:@Ui.Px(Math.Max(w.Completed > 0 ? 3 : 0, w.Completed * 120.0 / maxW))"></div>
+                    </div>
+                    <span>@w.Received / @w.Completed</span>
+                    <span>@w.Label</span>
+                </div>
+            }
+        </div>
+    </div>
+}
+else if (Loading)
+{
+    <div class="empty">Đang tải...</div>
+}
+
+@code {
+    private DashboardStats? _stats;
+    private List<PriorityAssessment> _top = new();
+    private List<(string Label, int Value, string Color, string Icon, string Link, string Hint)> _kpis = new();
+
+    private string Greeting => Now.Hour < 11 ? "Chào buổi sáng" : Now.Hour < 13 ? "Chào buổi trưa" : Now.Hour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
+
+    protected override async Task LoadAsync()
+    {
+        _stats = await DashboardSvc.GetStatsAsync();
+        var open = await Tasks.GetOpenTasksAsync();
+        _top = new PriorityEngine(Settings.Current).RankDirectWork(open, Now).Take(5).ToList();
+        var s = _stats;
+        _kpis = new()
+        {
+            ("Chưa hoàn thành", s.Open, "blue", "list", "/tasks", "Tổng số công việc đang mở"),
+            ("Cần xử lý hôm nay", s.Today, "orange", "today", "/tasks?time=today", "Hạn hoặc lịch thực hiện hôm nay"),
+            ("Ưu tiên cao / khẩn cấp", s.HighOrUrgent, "orange", "flag", "/tasks?prio=high", "Mức Cao hoặc Khẩn cấp"),
+            ("Quá hạn", s.Overdue, "red", "warning", "/tasks?time=overdue", "Đã quá hạn, chưa hoàn thành"),
+            ("Sắp đến hạn", s.DueSoon, "orange", "hourglass", "/tasks?time=soon", $"Đến hạn trong {Settings.Current.DueSoonDays} ngày tới"),
+            ("Chờ phản hồi / phối hợp", s.WaitingResponse, "gray", "people", "/tasks?status=waiting", "Chờ đơn vị khác phản hồi"),
+            ("Chờ lãnh đạo phê duyệt", s.WaitingApproval, "purple", "approve", "/tasks?status=WaitingApproval", "Đã trình, chờ phê duyệt"),
+            ("Hoàn thành trong tuần", s.CompletedThisWeek, "green", "done", "/tasks?status=all&time=doneweek", "Từ thứ Hai tuần này"),
+        };
+    }
+
+    private static double Pct(double v, double max) => v <= 0 ? 0 : Math.Max(2, v / max * 100);
+
+    private static string StatusColorKey(string? key) =>
+        Enum.TryParse<WorkTaskStatus>(key, out var s) ? Ui.StatusColor(s) : "gray";
+}

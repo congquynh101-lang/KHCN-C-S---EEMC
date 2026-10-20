@@ -1,0 +1,51 @@
+# Kiểm thử và đóng gói tự động mỗi khi đẩy mã lên GitHub
+name: CI – kiểm thử và đóng gói
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Khôi phục thư viện
+        run: dotnet restore EEMC.WorkManager.sln
+
+      - name: Build
+        run: dotnet build EEMC.WorkManager.sln -c Release --no-restore
+
+      - name: Kiểm thử
+        run: dotnet test tests/EEMC.WM.Tests -c Release --no-build --logger "trx;LogFileName=ketqua.trx"
+
+      - name: Lưu kết quả kiểm thử
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ket-qua-kiem-thu
+          path: tests/EEMC.WM.Tests/TestResults/*.trx
+
+      - name: Đóng gói bản web
+        run: dotnet publish src/EEMC.WM.Web -c Release -o artifacts/web -p:Version=2.0.${{ github.run_number }}
+
+      - name: Đóng gói bản desktop (1 tệp .exe)
+        run: dotnet publish src/EEMC.WM.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o artifacts/desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eemc-web
+          path: artifacts/web
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eemc-desktop
+          path: artifacts/desktop

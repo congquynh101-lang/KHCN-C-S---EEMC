@@ -1,0 +1,111 @@
+@page "/projects"
+@inherits LivePage
+@inject ProjectService Projects
+
+<PageTitle>Dự án KH&amp;CN – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Dự án KH&amp;CN</h1>
+    <span class="spacer"></span>
+    <label class="check small"><input type="checkbox" @bind="_archived" @bind:after="SafeLoadAsync" /> Hiện dự án đã lưu trữ</label>
+    <button class="btn" @onclick="() => _showTemplates = !_showTemplates"><Icon Name="copy" Class="sm" />Tạo từ mẫu</button>
+    <button class="btn primary" @onclick="NewProject"><Icon Name="plus" Class="sm" />Thêm dự án</button>
+</div>
+
+@if (_showTemplates)
+{
+    <div class="card mb">
+        <h2>Mẫu dự án nghiệp vụ</h2>
+        <div class="muted mb">Mẫu chỉ tạo tên, mô tả và các mốc điển hình (không có ngày). Phần mềm không tự tạo tiến độ, ngày hoàn thành hay trạng thái thực tế.</div>
+        <div class="grid grid-3">
+            @foreach (var t in ProjectService.Templates)
+            {
+                <div class="card" style="padding:12px">
+                    <b>@t.Name</b>
+                    <div class="small muted">@t.ManagementLevel · @t.Milestones.Length mốc</div>
+                    <button class="btn sm mt-s" @onclick="() => FromTemplate(t)">Tạo dự án này</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (_list.Count == 0 && !Loading)
+{
+    <div class="card empty">Chưa có dự án. Bấm "Thêm dự án" hoặc "Tạo từ mẫu".</div>
+}
+<div class="grid grid-2">
+    @foreach (var s in _list)
+    {
+        var p = s.Project;
+        <div class="card">
+            <div class="row nowrap">
+                <span class="badge b-@Ui.ProjectStatusColor(p.Status)">@Labels.Of(p.Status)</span>
+                <span class="muted small">@p.Code</span>
+                <span class="spacer"></span>
+                @if (p.IsArchived) { <span class="badge b-gray">Lưu trữ</span> }
+            </div>
+            <a class="task-title" style="font-size:15px;display:block;margin-top:6px" href="/projects/@p.Id">@p.Name</a>
+            <div class="task-meta">
+                @if (!string.IsNullOrEmpty(p.ManagementLevel)) { <span>@p.ManagementLevel</span> }
+                @if (!string.IsNullOrEmpty(p.Leader)) { <span>Chủ nhiệm: @p.Leader</span> }
+                @if (p.StartDate.HasValue || p.EndDate.HasValue) { <span>@Ui.D(p.StartDate) – @Ui.D(p.EndDate)</span> }
+            </div>
+            <div class="row mt">
+                <div class="progress" style="flex:1;height:8px"><div style="width:@(s.Progress ?? 0)%"></div></div>
+                <b>@(s.Progress.HasValue ? $"{s.Progress}%" : "—")</b>
+            </div>
+            <div class="task-meta">
+                <span>@s.TaskCount công việc</span>
+                <span>@s.OpenCount đang mở</span>
+                @if (s.OverdueCount > 0) { <b class="c-red">@s.OverdueCount quá hạn</b> }
+                @if (s.NextMilestone != null) { <span><Icon Name="milestone" Class="sm" /> @s.NextMilestone.Name @(s.NextMilestone.DueDate.HasValue ? "(" + Ui.D(s.NextMilestone.DueDate) + ")" : "")</span> }
+            </div>
+        </div>
+    }
+</div>
+
+@if (_edit != null)
+{
+    <ProjectEditor Project="_edit" OnClose="() => _edit = null" OnSaved="Saved" />
+}
+
+@code {
+    private List<ProjectSummary> _list = new();
+    private bool _archived, _showTemplates;
+    private Project? _edit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Projects.Changed += OnProjects;
+        await base.OnInitializedAsync();
+    }
+
+    private void OnProjects(object? s, EventArgs e) => InvokeAsync(async () => { await SafeLoadAsync(); StateHasChanged(); });
+
+    protected override async Task LoadAsync() => _list = await Projects.GetSummariesAsync(_archived);
+
+    private void NewProject() => _edit = new Project();
+
+    private async Task FromTemplate(ProjectTemplate t)
+    {
+        try
+        {
+            var p = await Projects.CreateFromTemplateAsync(t);
+            UiSvc.Success($"Đã tạo {p.Code}. Hãy cập nhật cấp quản lý, chủ nhiệm, thời gian thực hiện.");
+            Nav.NavigateTo($"/projects/{p.Id}");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tạo được dự án"); }
+    }
+
+    private void Saved(Project p)
+    {
+        _edit = null;
+        Nav.NavigateTo($"/projects/{p.Id}");
+    }
+
+    public override void Dispose()
+    {
+        Projects.Changed -= OnProjects;
+        base.Dispose();
+    }
+}

@@ -1,0 +1,196 @@
+@page "/projects/{Id:int}"
+@inherits LivePage
+@inject ProjectService Projects
+
+<PageTitle>@(_p?.Code ?? "Dự án") – EEMC Work Manager</PageTitle>
+
+@if (_p == null)
+{
+    <div class="card">@(Loading ? "Đang tải..." : "Không tìm thấy dự án.") <a href="/projects">Về danh sách</a></div>
+}
+else
+{
+    <div class="page-head">
+        <div style="flex:1 1 320px;min-width:0">
+            <div class="muted"><a href="/projects">Dự án KH&amp;CN</a> › @_p.Code</div>
+            <h1 style="font-size:22px">@_p.Name</h1>
+            <div class="task-meta">
+                <span class="badge b-@Ui.ProjectStatusColor(_p.Status)">@Labels.Of(_p.Status)</span>
+                @if (!string.IsNullOrEmpty(_p.ManagementLevel)) { <span>@_p.ManagementLevel</span> }
+                @if (!string.IsNullOrEmpty(_p.LeadUnit)) { <span>Chủ trì: @_p.LeadUnit</span> }
+                @if (!string.IsNullOrEmpty(_p.Leader)) { <span>Chủ nhiệm: @_p.Leader</span> }
+                <span>Thời gian: @(Ui.D(_p.StartDate)) – @(Ui.D(_p.EndDate))</span>
+            </div>
+        </div>
+        <div class="row">
+            <button class="btn" @onclick="() => _edit = true"><Icon Name="edit" Class="sm" />Sửa</button>
+            <button class="btn primary" @onclick="() => OpenEditor(projectId: _p.Id)"><Icon Name="plus" Class="sm" />Thêm công việc</button>
+            <button class="btn ghost danger" @onclick="Delete" title="Xóa dự án (công việc vẫn giữ)"><Icon Name="trash" Class="sm" /></button>
+        </div>
+    </div>
+
+    <div class="grid grid-4 mb">
+        <div class="card"><div class="muted">Tiến độ tổng thể</div><div class="kpi-value">@(_progress.HasValue ? $"{_progress}%" : "—")</div><div class="progress mt-s"><div style="width:@(_progress ?? 0)%"></div></div></div>
+        <div class="card"><div class="muted">Công việc</div><div class="kpi-value">@_tasks.Count</div><div class="small muted">@_tasks.Count(t => t.Status == WorkTaskStatus.Completed) hoàn thành</div></div>
+        <div class="card"><div class="muted">Quá hạn</div><div class="kpi-value c-red">@_tasks.Count(t => !StatusGroups.IsClosed(t.Status) && t.DueAt < Now)</div></div>
+        <div class="card"><div class="muted">Mốc đã đạt</div><div class="kpi-value">@_p.Milestones.Count(m => m.CompletedAt != null)/@_p.Milestones.Count</div></div>
+    </div>
+
+    <div class="tabs">
+        <button class="@(_tab == "tasks" ? "on" : "")" @onclick='() => _tab = "tasks"'>Công việc</button>
+        <button class="@(_tab == "ms" ? "on" : "")" @onclick='() => _tab = "ms"'>Mốc quan trọng</button>
+        <button class="@(_tab == "info" ? "on" : "")" @onclick='() => _tab = "info"'>Tồn đọng, xin ý kiến</button>
+        <button class="@(_tab == "doc" ? "on" : "")" @onclick='() => _tab = "doc"'>Hồ sơ</button>
+    </div>
+
+    @if (_tab == "tasks")
+    {
+        <div class="card">
+            @if (_tasks.Count == 0)
+            {
+                <div class="empty">
+                    Chưa có công việc nào thuộc dự án.
+                    @if (_legacy > 0) { <div class="mt"><button class="btn" @onclick="LinkLegacy">Gắn @_legacy công việc cũ có cùng tên dự án</button></div> }
+                </div>
+            }
+            @foreach (var t in _tasks.Where(t => t.ParentId == null || _tasks.All(x => x.Id != t.ParentId)))
+            {
+                <TaskCard Item="t" ShowReasons="false">
+                    <div class="small muted mt-s">Tiến độ @t.Progress% · Trọng số @t.Weight.ToString("0.##")</div>
+                    @foreach (var c in _tasks.Where(c => c.ParentId == t.Id))
+                    {
+                        <div class="row small mt-s" style="padding-left:12px">
+                            <Icon Name="sub" Class="sm" />
+                            <a href="/tasks/@c.Id" class="spacer">@c.Title</a>
+                            <span class="badge b-@Ui.StatusColor(c.Status)">@Labels.Of(c.Status)</span>
+                            <span class="c-@Ui.DueColor(c, Now)">@Ui.Remaining(c, Now)</span>
+                        </div>
+                    }
+                </TaskCard>
+            }
+        </div>
+    }
+    else if (_tab == "ms")
+    {
+        <div class="card">
+            <div class="row mb">
+                <input class="input" style="max-width:360px" placeholder="Tên mốc mới..." @bind="_msName" />
+                <input type="date" class="input" style="width:auto" value="@Ui.ToDateInput(_msDue)" @onchange="e => _msDue = Ui.FromInput(e.Value?.ToString())" />
+                <button class="btn" @onclick="AddMilestone"><Icon Name="plus" Class="sm" />Thêm mốc</button>
+            </div>
+            @if (_p.Milestones.Count == 0) { <div class="empty">Chưa có mốc.</div> }
+            <table class="data">
+                <tbody>
+                    @foreach (var m in _p.Milestones)
+                    {
+                        var late = m.CompletedAt == null && m.DueDate < Now.Date;
+                        <tr>
+                            <td style="width:34px"><input type="checkbox" checked="@(m.CompletedAt != null)" @onchange="() => ToggleMilestone(m)" title="Đánh dấu đã đạt" /></td>
+                            <td class="title"><Icon Name="milestone" Class="sm" /> @m.Name @if (m.CompletedAt != null) { <span class="small c-green">— đạt ngày @Ui.D(m.CompletedAt)</span> }</td>
+                            <td class="nowrap"><input type="date" class="input @(late ? "invalid" : "")" style="width:auto" value="@Ui.ToDateInput(m.DueDate)" @onchange="e => SetMilestoneDate(m, e.Value?.ToString())" /></td>
+                            <td><button class="btn sm ghost danger icon-only" @onclick="() => DeleteMilestone(m)"><Icon Name="trash" Class="sm" /></button></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (_tab == "info")
+    {
+        <div class="grid grid-2">
+            <div class="card"><h2>Mô tả</h2><div style="white-space:pre-line">@(_p.Description ?? "—")</div></div>
+            <div class="card"><h2>Các vấn đề tồn đọng</h2><div style="white-space:pre-line">@(_p.Issues ?? "—")</div></div>
+            <div class="card"><h2>Những quyết định cần xin ý kiến</h2><div style="white-space:pre-line">@(_p.DecisionsNeeded ?? "—")</div></div>
+            <div class="card">
+                <h2>Công việc cần xin ý kiến lãnh đạo</h2>
+                @foreach (var t in _tasks.Where(t => !string.IsNullOrWhiteSpace(t.LeaderOpinionNeeded) && !StatusGroups.IsClosed(t.Status)))
+                {
+                    <div class="timeline-item"><div><a href="/tasks/@t.Id">@t.Code</a>: @t.LeaderOpinionNeeded</div></div>
+                }
+                <div class="muted small mt-s">Cập nhật nội dung ở nút "Sửa" của dự án hoặc trường "Nội dung cần xin ý kiến lãnh đạo" của từng công việc.</div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <AttachmentPanel ProjectId="_p.Id" />
+    }
+
+    @if (_edit) { <ProjectEditor Project="_p" OnClose="() => _edit = false" OnSaved="async _ => { _edit = false; await SafeLoadAsync(); }" /> }
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+    private Project? _p;
+    private List<WorkTask> _tasks = new();
+    private int? _progress;
+    private int _legacy, _loadedId;
+    private string _tab = "tasks", _msName = "";
+    private DateTime? _msDue;
+    private bool _edit;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != Id) { _loadedId = Id; await SafeLoadAsync(); }
+    }
+
+    protected override async Task LoadAsync()
+    {
+        if (Id == 0) return;
+        _p = await Projects.GetAsync(Id);
+        if (_p == null) return;
+        _tasks = await Projects.GetTasksAsync(Id);
+        _progress = ProgressCalculator.Weighted(_tasks.Where(t => t.ParentId == null || _tasks.All(x => x.Id != t.ParentId)));
+        if (_tasks.Count == 0)
+        {
+            var key = TextNormalizer.Normalize(_p.Name);
+            var r = await Tasks.QueryAllAsync(new TaskQuery { StatusFilter = StatusFilter.All, Search = _p.Name });
+            _legacy = r.Count(t => t.ProjectId == null && TextNormalizer.Normalize(t.ProjectName) == key);
+        }
+    }
+
+    private async Task LinkLegacy()
+    {
+        var n = await Projects.LinkByProjectNameAsync(Id);
+        UiSvc.Success($"Đã gắn {n} công việc vào dự án.");
+        await SafeLoadAsync();
+    }
+
+    private async Task AddMilestone()
+    {
+        try
+        {
+            await Projects.SaveMilestoneAsync(new Milestone { ProjectId = Id, Name = _msName, DueDate = _msDue });
+            _msName = ""; _msDue = null;
+            await SafeLoadAsync();
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thêm được mốc"); }
+    }
+
+    private async Task ToggleMilestone(Milestone m)
+    {
+        m.CompletedAt = m.CompletedAt == null ? Now : null;
+        await Projects.SaveMilestoneAsync(m);
+        await SafeLoadAsync();
+    }
+
+    private async Task SetMilestoneDate(Milestone m, string? v)
+    {
+        m.DueDate = Ui.FromInput(v);
+        await Projects.SaveMilestoneAsync(m);
+    }
+
+    private async Task DeleteMilestone(Milestone m)
+    {
+        if (!await UiSvc.ConfirmAsync($"Xóa mốc \"{m.Name}\"?", "Xóa", danger: true)) return;
+        await Projects.DeleteMilestoneAsync(m.Id);
+        await SafeLoadAsync();
+    }
+
+    private async Task Delete()
+    {
+        if (!await UiSvc.ConfirmAsync($"Xóa dự án {_p!.Code}?\nCác công việc và hồ sơ vẫn được giữ, chỉ bỏ liên kết với dự án.\nNếu chỉ muốn ẩn, hãy dùng \"Lưu trữ\".", "Xóa dự án", danger: true)) return;
+        await Projects.DeleteAsync(Id);
+        Nav.NavigateTo("/projects");
+    }
+}

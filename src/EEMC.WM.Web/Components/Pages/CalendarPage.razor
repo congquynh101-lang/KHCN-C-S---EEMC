@@ -1,0 +1,200 @@
+@page "/calendar"
+@inherits LivePage
+
+<PageTitle>Lịch làm việc – EEMC Work Manager</PageTitle>
+<div class="page-head">
+    <h1>Lịch làm việc</h1>
+    <span class="spacer"></span>
+    <div class="seg">
+        <button class="@(_mode == "day" ? "on" : "")" @onclick='() => SetMode("day")'>Ngày</button>
+        <button class="@(_mode == "week" ? "on" : "")" @onclick='() => SetMode("week")'>Tuần</button>
+        <button class="@(_mode == "month" ? "on" : "")" @onclick='() => SetMode("month")'>Tháng</button>
+    </div>
+</div>
+<div class="row mb">
+    <button class="btn icon-only" @onclick="() => Move(-1)"><Icon Name="chevron-left" /></button>
+    <button class="btn" @onclick="Today">Hôm nay</button>
+    <button class="btn icon-only" @onclick="() => Move(1)"><Icon Name="chevron-right" /></button>
+    <b style="font-size:16px;margin-left:8px">@_range</b>
+    <span class="spacer"></span>
+    <span class="muted small hide-mobile">Kéo thả công việc sang ngày khác để dời hạn hoặc đặt ngày thực hiện · Đỏ: quá hạn · Cam: ưu tiên cao · Xanh lá: hoàn thành</span>
+</div>
+
+@if (_mode == "day")
+{
+    <div class="grid grid-2">
+        <div class="card">
+            <h2>Lịch đề xuất trong ngày</h2>
+            <div class="muted mb">Lịch ĐỀ XUẤT theo giờ làm việc, ưu tiên và thời lượng. Khối "ước tính" dùng thời lượng mặc định.</div>
+            @if (_blocks.Count == 0) { <div class="empty">Không có khối công việc đề xuất cho ngày này.</div> }
+            @foreach (var b in _blocks)
+            {
+                <div class="timeline-item">
+                    <div style="width:100px;flex:none"><b>@b.Start.ToString("HH:mm") – @b.End.ToString("HH:mm")</b><div class="tertiary small">@($"{b.Hours:0.##} giờ"){(b.IsEstimate ? " (ước tính)" : "")}</div></div>
+                    <div style="flex:1;min-width:0"><a href="/tasks/@b.Task.Id">@b.Task.Title</a><div class="small c-blue">@(b.IsFixed ? "Lịch cố định" : b.Task.PlannedStart == b.Start ? "Đã đưa vào kế hoạch" : "Đề xuất")</div></div>
+                    @if (!b.IsFixed && b.Task.PlannedStart != b.Start) { <button class="btn sm" @onclick="() => Tasks.SetPlannedStartAsync(b.Task.Id, b.Start)">Chấp thuận</button> }
+                </div>
+            }
+        </div>
+        <div class="card">
+            <h2>Hạn, lịch cố định và kế hoạch trong ngày</h2>
+            @{ var list = EntriesOn(_anchor); }
+            @if (list.Count == 0) { <div class="empty">Không có công việc.</div> }
+            @foreach (var e in list)
+            {
+                <div class="timeline-item">
+                    <div style="width:80px;flex:none"><b>@e.At.ToString("HH:mm")</b><div class="tertiary small">@e.Kind</div></div>
+                    <div style="flex:1;min-width:0"><TaskCard Item="e.Task" ShowReasons="false" Compact="true" /></div>
+                </div>
+            }
+        </div>
+    </div>
+}
+else
+{
+    <div class="@(_mode == "week" ? "cal-week" : "cal-month")">
+        @if (_mode == "month")
+        {
+            @foreach (var dn in new[] { "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật" }) { <div class="cal-dow">@dn</div> }
+        }
+        @for (var d = _from; d < _to; d = d.AddDays(1))
+        {
+            var day = d;
+            var entries = EntriesOn(day);
+            var max = _mode == "month" ? 3 : 50;
+            <div class="cal-day @(day == Now.Date ? "today" : "") @(!Settings.Current.IsWorkDay(day) ? "off" : "") @(_mode == "month" && day.Month != _anchor.Month ? "other" : "") @(_dropDay == day ? "drop" : "")"
+                 ondragover="event.preventDefault()" @ondragenter="() => _dropDay = day" @ondrop="() => DropAsync(day)">
+                <div class="cal-head">
+                    <a href="javascript:void(0)" @onclick="() => OpenDay(day)">@(_mode == "week" ? $"{Labels.DayOfWeekShort(day.DayOfWeek)} {day:dd/MM}" : day.Day.ToString())</a>
+                    <span class="spacer"></span>
+                    @if (_load.TryGetValue(day, out var h) && h > 0) { <span class="tertiary small" title="Giờ xử lý đề xuất">@h.ToString("0.#")g</span> }
+                    <button class="btn ghost sm icon-only" title="Thêm công việc hạn ngày này" @onclick="() => OpenEditor(due: day)"><Icon Name="plus" Class="sm" /></button>
+                </div>
+                @foreach (var e in entries.Take(max))
+                {
+                    var color = e.Color(Now);
+                    <a class="entry b-@color" style="border-left-color:var(--@color)" href="/tasks/@e.Task.Id" draggable="true" @ondragstart="() => _drag = e"
+                       title="@($"{e.Kind} {Ui.Dt(e.At)}\n[{e.Task.Code}] {e.Task.Title}\n{Labels.Of(e.Task.Status)} · {Ui.Remaining(e.Task, Now)}")">
+                        <b>@e.At.ToString("HH:mm")</b> @e.Task.Title
+                    </a>
+                }
+                @if (entries.Count > max) { <a class="small" href="javascript:void(0)" @onclick="() => OpenDay(day)">+@(entries.Count - max) công việc khác</a> }
+            </div>
+        }
+    </div>
+}
+
+@if (_pendingMove != null)
+{
+    <div class="overlay">
+        <div class="dialog small">
+            <h2>Dời công việc sang @Labels.DayOfWeekVi(_pendingMove.Value.Day.DayOfWeek) @_pendingMove.Value.Day.ToString("dd/MM/yyyy")?</h2>
+            <div class="muted">[@_pendingMove.Value.Entry.Task.Code] @_pendingMove.Value.Entry.Task.Title</div>
+            <div class="dialog-foot">
+                <button class="btn" @onclick="() => _pendingMove = null">Hủy</button>
+                <button class="btn" @onclick="() => ConfirmMove(false)">Chỉ đặt ngày thực hiện</button>
+                <button class="btn primary" @onclick="() => ConfirmMove(true)">Đổi hạn hoàn thành</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private sealed record Entry(WorkTask Task, DateTime At, string Kind)
+    {
+        public string Color(DateTime now) => StatusGroups.IsClosed(Task.Status) ? (Task.Status == WorkTaskStatus.Completed ? "green" : "gray")
+            : Task.DueAt < now ? "red" : Kind == "Hạn" ? Ui.PriorityColor(Task.Priority) : "blue";
+    }
+
+    private string _mode = "week", _range = "";
+    private DateTime _anchor, _from, _to;
+    private DateTime? _dropDay;
+    private List<Entry> _entries = new();
+    private List<ScheduledBlock> _blocks = new();
+    private Dictionary<DateTime, double> _load = new();
+    private Entry? _drag;
+    private (Entry Entry, DateTime Day)? _pendingMove;
+
+    protected override Task OnInitializedAsync()
+    {
+        _anchor = Clock.Now.Date;
+        return base.OnInitializedAsync();
+    }
+
+    protected override async Task LoadAsync()
+    {
+        if (_anchor == default) _anchor = Now.Date;
+        switch (_mode)
+        {
+            case "day": _from = _anchor; _to = _from.AddDays(1); _range = $"{Labels.DayOfWeekVi(_from.DayOfWeek)}, {_from:dd/MM/yyyy}"; break;
+            case "week": _from = TaskService.StartOfWeek(_anchor); _to = _from.AddDays(7); _range = $"Tuần {System.Globalization.ISOWeek.GetWeekOfYear(_from)}: {_from:dd/MM} – {_to.AddDays(-1):dd/MM/yyyy}"; break;
+            default: _from = TaskService.StartOfWeek(new DateTime(_anchor.Year, _anchor.Month, 1)); _to = _from.AddDays(42); _range = $"Tháng {_anchor.Month}/{_anchor.Year}"; break;
+        }
+        var tasks = await Tasks.GetTasksInRangeAsync(_from, _to);
+        _entries = new();
+        foreach (var t in tasks)
+        {
+            if (t.DueAt >= _from && t.DueAt < _to) _entries.Add(new Entry(t, t.DueAt, "Hạn"));
+            if (t.PlannedStart.HasValue && t.PlannedStart >= _from && t.PlannedStart < _to && (t.PlannedStart.Value.Date != t.DueAt.Date || t.IsFixedTime))
+                _entries.Add(new Entry(t, t.PlannedStart.Value, t.IsFixedTime ? "Cố định" : "Kế hoạch"));
+        }
+        _blocks = new();
+        _load = new();
+        if (_to > Now)
+        {
+            var open = await Tasks.GetOpenTasksAsync();
+            var p = new ScheduleEngine(Settings.Current).Propose(open, Now, Math.Min(60, Math.Max(1, (int)(_to - Now.Date).TotalDays)));
+            foreach (var g in p.Blocks.Where(b => !b.IsFixed).GroupBy(b => b.Start.Date)) _load[g.Key] = g.Sum(b => b.Hours);
+            if (_mode == "day") _blocks = p.BlocksOn(_anchor).ToList();
+        }
+    }
+
+    private List<Entry> EntriesOn(DateTime d) => _entries.Where(e => e.At.Date == d).OrderBy(e => e.At).ToList();
+
+    private async Task SetMode(string m) { _mode = m; await SafeLoadAsync(); }
+    private async Task OpenDay(DateTime d) { _anchor = d; _mode = "day"; await SafeLoadAsync(); }
+    private async Task Today() { _anchor = Now.Date; await SafeLoadAsync(); }
+    private async Task Move(int dir)
+    {
+        _anchor = _mode switch { "day" => _anchor.AddDays(dir), "week" => _anchor.AddDays(7 * dir), _ => _anchor.AddMonths(dir) };
+        await SafeLoadAsync();
+    }
+
+    private Task DropAsync(DateTime day)
+    {
+        _dropDay = null;
+        if (_drag == null || _drag.At.Date == day) return Task.CompletedTask;
+        if (StatusGroups.IsClosed(_drag.Task.Status)) { UiSvc.Show("Công việc đã hoàn thành/hủy, không dời lịch."); return Task.CompletedTask; }
+        _pendingMove = (_drag, day);
+        _drag = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task ConfirmMove(bool changeDue)
+    {
+        if (_pendingMove is not { } m) return;
+        _pendingMove = null;
+        try
+        {
+            var full = await Tasks.GetAsync(m.Entry.Task.Id);
+            if (full == null) return;
+            if (changeDue)
+            {
+                var newDue = m.Day.Date + m.Entry.At.TimeOfDay;
+                if (newDue < full.ReceivedAt) { UiSvc.Show("Hạn mới không được trước ngày nhận việc.", ToastKind.Warning); return; }
+                full.DueAt = newDue;
+                full.Category = null; full.Project = null; full.Parent = null;
+                await Tasks.UpdateAsync(full);
+                UiSvc.Success($"Đã đổi hạn {full.Code} sang {Ui.Dt(newDue)}");
+            }
+            else
+            {
+                var start = Settings.Current.WorkPeriods.Count > 0 ? Settings.Current.WorkPeriods.Min(p => p.Start) : TimeSpan.FromHours(8);
+                var planned = m.Entry.Kind == "Hạn" ? m.Day.Date + start : m.Day.Date + m.Entry.At.TimeOfDay;
+                await Tasks.SetPlannedStartAsync(full.Id, planned);
+                UiSvc.Success($"Đã đặt ngày thực hiện {full.Code}: {Ui.Dt(planned)}");
+            }
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không dời được công việc"); }
+    }
+}
