@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/App_Data/
+.git/
+.vs/
+.github/
+artifacts/
+publish/
+BanCaiDat/
+TestResults/
+*.db
+*.db-wal
+*.db-shm

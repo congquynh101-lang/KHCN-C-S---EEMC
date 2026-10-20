@@ -1,0 +1,13 @@
+# EEMC Work Manager Web trên Synology (Container Manager → Dự án → Tạo → dán nội dung này)
+# Hướng dẫn: docs/TRIEN_KHAI_SYNOLOGY.md
+services:
+  eemc-workmanager:
+    image: ghcr.io/congquynh101-lang/eemc-workmanager-web:latest
+    container_name: eemc-workmanager
+    restart: unless-stopped
+    ports:
+      - "8088:8080"     # Mở bằng http://<địa-chỉ-NAS>:8088 — đổi số 8088 nếu cổng đã bị dùng
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ./data:/data    # Dữ liệu nằm trong thư mục dự án: /docker/eemc-workmanager/data
