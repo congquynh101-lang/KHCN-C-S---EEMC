@@ -20,18 +20,14 @@ Bạn sửa mã ──► GitHub (nhánh main) ──► GitHub Actions đóng g
 
 > Nếu Trung tâm gói không có Container Manager, dòng NAS của bạn không hỗ trợ Docker — xem mục 10 (máy ảo).
 
-## 1. Một lần trên GitHub: cho phép NAS tải ảnh
+## 1. Ảnh phần mềm trên GitHub
 
 Mỗi lần mã mới vào nhánh `main`, workflow **"Ảnh Docker (Synology / Linux)"** tự đóng gói ảnh
-`ghcr.io/congquynh101-lang/eemc-workmanager-web`. Lần đầu GitHub để ảnh ở chế độ riêng tư, cần mở công khai
-để NAS tải về mà không phải đăng nhập:
+`ghcr.io/congquynh101-lang/eemc-workmanager-web` cho cả chip Intel/AMD và ARM 64-bit.
+Ảnh đang ở chế độ **công khai** (giống repo) nên NAS tải về không cần đăng nhập.
+Ảnh chỉ chứa chương trình, **không chứa dữ liệu** hay mật khẩu nào.
 
-1. Mở trang hồ sơ GitHub của bạn → tab **Packages** → **eemc-workmanager-web**.
-2. **Package settings** (cuối cột phải) → mục *Danger Zone* → **Change visibility** → **Public** → gõ tên gói để xác nhận.
-
-Ảnh chỉ chứa chương trình, **không chứa dữ liệu** hay mật khẩu nào. Mã nguồn vốn đã công khai.
-
-<details><summary>Muốn giữ ảnh ở chế độ riêng tư?</summary>
+<details><summary>Nếu sau này chuyển ảnh sang riêng tư</summary>
 
 Tạo *Personal access token (classic)* chỉ có quyền `read:packages` (GitHub → Settings → Developer settings).
 Trên NAS: Container Manager → **Sổ đăng ký** → **Cài đặt** → **Thêm** → địa chỉ `https://ghcr.io`,
@@ -143,7 +139,7 @@ Dữ liệu từ bản desktop: dùng **Cài đặt → Nhập dữ liệu từ 
 | Hiện tượng | Cách xử lý |
 |---|---|
 | Container dừng ngay sau khi chạy | Container → `eemc-workmanager` → tab **Nhật ký** để xem lỗi |
-| Không tải được ảnh (*denied*/*unauthorized*) | Ảnh còn riêng tư — làm mục 1 |
+| Không tải được ảnh (*denied*/*unauthorized*) | Ảnh đã bị chuyển sang riêng tư — xem mục 1 |
 | Báo cổng đã dùng | Đổi `8088` trong docker-compose rồi **Build** lại |
 | Trang mở được nhưng bấm không phản hồi | Thiếu tiêu đề WebSocket ở Proxy ngược (mục 5) |
 | Giờ nhắc việc lệch | Kiểm tra `TZ: Asia/Ho_Chi_Minh` và giờ hệ thống của NAS |
