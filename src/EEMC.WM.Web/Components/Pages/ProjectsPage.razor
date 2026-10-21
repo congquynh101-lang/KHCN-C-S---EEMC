@@ -6,10 +6,40 @@
 <div class="page-head">
     <h1>Dự án KH&amp;CN</h1>
     <span class="spacer"></span>
+    <div class="seg">
+        <button class="@(_treeMode ? "" : "on")" @onclick="() => _treeMode = false">Thẻ</button>
+        <button class="@(_treeMode ? "on" : "")" @onclick="() => _treeMode = true">Cây</button>
+    </div>
     <label class="check small"><input type="checkbox" @bind="_archived" @bind:after="SafeLoadAsync" /> Hiện dự án đã lưu trữ</label>
-    <button class="btn" @onclick="() => _showTemplates = !_showTemplates"><Icon Name="copy" Class="sm" />Tạo từ mẫu</button>
-    <button class="btn primary" @onclick="NewProject"><Icon Name="plus" Class="sm" />Thêm dự án</button>
+    @if (CanEdit)
+    {
+        <button class="btn" @onclick="() => _showTemplates = !_showTemplates"><Icon Name="copy" Class="sm" />Tạo từ mẫu</button>
+        <button class="btn primary" @onclick="NewProject"><Icon Name="plus" Class="sm" />Thêm dự án</button>
+    }
 </div>
+
+@if (_treeMode)
+{
+    <div class="card mb">
+        <div class="row mb-s">
+            <span class="muted spacer">Dự án → công việc → việc con, cháu, chắt. Mở nhánh nào mới tải nhánh đó.</span>
+            <label class="check small"><input type="checkbox" @bind="_closed" /> Cả việc đã hoàn thành/hủy</label>
+        </div>
+        <TreeView @key="_closed" @ref="_tree" LoadChildren="LoadTreeAsync" Search="SearchTreeAsync" Placeholder="Tìm dự án, mã hoặc tên công việc..." Empty="Chưa có dự án hoặc công việc.">
+            <Actions>
+                @if (CanEdit && context.Key.StartsWith("p:"))
+                {
+                    var pid = context.Data is Project pr ? pr.Id : (int?)null;
+                    <button class="btn sm ghost" title="Thêm công việc vào @context.Label" @onclick="() => OpenEditor(projectId: pid)"><Icon Name="plus" Class="sm" /><span class="hide-mobile">Công việc</span></button>
+                }
+                else if (CanEdit && context.Data is WorkTask t && context.Level <= TaskService.MaxSubtaskDepth)
+                {
+                    <button class="btn sm ghost" title="Thêm việc con cho @t.Code" @onclick="() => OpenEditor(parentId: t.Id)"><Icon Name="plus" Class="sm" /><span class="hide-mobile">Việc con</span></button>
+                }
+            </Actions>
+        </TreeView>
+    </div>
+}
 
 @if (_showTemplates)
 {
@@ -29,6 +59,8 @@
     </div>
 }
 
+@if (!_treeMode)
+{
 @if (_list.Count == 0 && !Loading)
 {
     <div class="card empty">Chưa có dự án. Bấm "Thêm dự án" hoặc "Tạo từ mẫu".</div>
@@ -63,6 +95,7 @@
         </div>
     }
 </div>
+}
 
 @if (_edit != null)
 {
@@ -82,7 +115,60 @@
 
     private void OnProjects(object? s, EventArgs e) => InvokeAsync(async () => { await SafeLoadAsync(); StateHasChanged(); });
 
-    protected override async Task LoadAsync() => _list = await Projects.GetSummariesAsync(_archived);
+    protected override async Task LoadAsync()
+    {
+        _list = await Projects.GetSummariesAsync(_archived);
+        if (_treeMode && _tree != null) await _tree.ReloadAsync();
+    }
+
+    // ---------------------------------------------------------------- Cây Dự án → Công việc
+
+    private bool _treeMode, _closed;
+    private TreeView? _tree;
+
+    private async Task<List<TreeNode>> LoadTreeAsync(TreeNode? parent)
+    {
+        if (parent == null)
+        {
+            var counts = await Tasks.CountRootTasksByProjectAsync(_closed);
+            var nodes = _list.Select(s => new TreeNode
+            {
+                Key = $"p:{s.Project.Id}", Label = $"{s.Project.Code} – {s.Project.Name}", Href = $"/projects/{s.Project.Id}", Icon = "project",
+                Badge = Labels.Of(s.Project.Status), BadgeColor = Ui.ProjectStatusColor(s.Project.Status),
+                Meta = s.Progress.HasValue ? $"{s.Progress}%" : null, ChildCount = counts.GetValueOrDefault(s.Project.Id), Data = s.Project
+            }).ToList();
+            if (counts.GetValueOrDefault(0) > 0)
+                nodes.Add(new TreeNode { Key = "p:0", Label = "Công việc không thuộc dự án", Icon = "folder", ChildCount = counts[0] });
+            return nodes;
+        }
+        var level = parent.Data is WorkTask t
+            ? await Tasks.GetTreeLevelAsync(null, t.Id, _closed)
+            : await Tasks.GetTreeLevelAsync((parent.Data as Project)?.Id, null, _closed);
+        return level.Select(x => new TreeNode
+        {
+            Key = $"t:{x.Task.Id}", Label = $"{x.Task.Code} · {x.Task.Title}", Href = $"/tasks/{x.Task.Id}",
+            Badge = Labels.Of(x.Task.Status), BadgeColor = Ui.StatusColor(x.Task.Status),
+            Meta = Ui.Remaining(x.Task, Now), MetaColor = Ui.DueColor(x.Task, Now), ChildCount = x.ChildCount, Data = x.Task
+        }).ToList();
+    }
+
+    /// <summary>Đường dẫn từ dự án tới từng kết quả: [dự án, công việc gốc, ..., công việc khớp].</summary>
+    private async Task<List<IReadOnlyList<string>>> SearchTreeAsync(string q)
+    {
+        var terms = TextNormalizer.Normalize(q).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var paths = new List<IReadOnlyList<string>>();
+        foreach (var s in _list.Where(s => terms.All(TextNormalizer.Normalize(s.Project.Code + " " + s.Project.Name).Contains)))
+            paths.Add(new[] { $"p:{s.Project.Id}" });
+        foreach (var t in (await Tasks.SearchQuickAsync(q, 20)).Where(t => _closed || !StatusGroups.IsClosed(t.Status)))
+        {
+            var ancestors = await Tasks.GetAncestorsAsync(t.Id);
+            var path = new List<string> { $"p:{(ancestors.FirstOrDefault() ?? t).ProjectId ?? 0}" };
+            path.AddRange(ancestors.Select(a => $"t:{a.Id}"));
+            path.Add($"t:{t.Id}");
+            paths.Add(path);
+        }
+        return paths;
+    }
 
     private void NewProject() => _edit = new Project();
 

@@ -98,6 +98,50 @@ public sealed class LegalTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Article_body_splits_into_clauses_and_points()
+    {
+        var body = LegalTextParser.SplitBody("Phần dẫn.\n1. Khoản một:\na) Điểm a;\ntiếp điểm a\nb) Điểm b.\n2. Khoản hai, 1.000 đồng.\n- gạch đầu dòng");
+        Assert.Equal(new[] { "Phần dẫn." }, body.Intro);
+        Assert.Equal(new[] { "1", "2" }, body.Clauses.Select(c => c.Number));
+        Assert.Equal(new[] { "a", "b" }, body.Clauses[0].Points.Select(p => p.Letter));
+        Assert.Equal(2, body.Clauses[0].Points[0].Lines.Count);
+        Assert.Equal(2, body.Clauses[1].Lines.Count); // "1.000" không phải khoản mới
+        var onlyPoints = LegalTextParser.SplitBody("a) Một;\nb) Hai.");
+        Assert.Equal("", Assert.Single(onlyPoints.Clauses).Number);
+    }
+
+    [Fact]
+    public void Citations_are_read_in_any_order_and_located_in_full_text()
+    {
+        Assert.Equal(new LegalCitation("5", "2", "a"), LegalTextParser.ParseCitation("Điều 5, khoản 2, điểm a"));
+        Assert.Equal(new LegalCitation("5", "2", "a"), LegalTextParser.ParseCitation("điểm a khoản 2 Điều 5"));
+        Assert.Equal(new LegalCitation("3a", null, null), LegalTextParser.ParseCitation("Điều 3a"));
+        Assert.Equal("Điểm a khoản 2 Điều 5", LegalTextParser.Cite("5", "2", "a"));
+
+        var s = LegalTextParser.Parse(Sample);
+        var d2 = s.Single(x => x.Number == "2").SortOrder;
+        Assert.Equal(($"sec-{d2}-k1-a", (string?)null), LegalTextParser.Locate(s, LegalTextParser.ParseCitation("Điều 2, khoản 1, điểm a")));
+        Assert.Equal(($"sec-{d2}-k2", (string?)null), LegalTextParser.Locate(s, LegalTextParser.ParseCitation("khoản 2 Điều 2")));
+        var (anchor, error) = LegalTextParser.Locate(s, LegalTextParser.ParseCitation("Điều 2, khoản 2, điểm c"));
+        Assert.Equal($"sec-{d2}-k2", anchor); // mở khoản gần nhất
+        Assert.NotNull(error);
+        Assert.Equal("toàn văn không có Điều 9", LegalTextParser.Locate(s, LegalTextParser.ParseCitation("Điều 9")).Error);
+        Assert.Equal((null, null), LegalTextParser.Locate(Array.Empty<LegalSection>(), LegalTextParser.ParseCitation("Điều 9"))); // chưa có toàn văn: không kiểm tra
+        Assert.Equal(LegalDocType.Guidance, LegalTextParser.ReadHeader("HƯỚNG DẪN\nThực hiện quy chế mẫu").Type);
+    }
+
+    [Fact]
+    public async Task Summary_citations_must_exist_in_full_text()
+    {
+        var d = await CreateAsync();
+        var wrong = new[] { new LegalPoint { Kind = LegalPointKind.KeyPoint, Text = "Sai căn cứ", Citation = "Điều 2, khoản 5" } };
+        var ex = await Assert.ThrowsAsync<ValidationException>(() => _legal.SaveSummaryAsync(d.Id, "Nói về", null, wrong, "Người lập"));
+        Assert.Contains("không có khoản 5", ex.Message);
+        var right = new[] { new LegalPoint { Kind = LegalPointKind.KeyPoint, Text = "Đúng căn cứ", Citation = "điểm b khoản 1 Điều 2" } };
+        await _legal.SaveSummaryAsync(d.Id, "Nói về", null, right, "Người lập");
+    }
+
+    [Fact]
     public void Header_reader_only_reads_what_is_written()
     {
         var (number, type, issued) = LegalTextParser.ReadHeader(Sample);

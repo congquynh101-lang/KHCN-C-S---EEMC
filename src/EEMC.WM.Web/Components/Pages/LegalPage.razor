@@ -11,12 +11,25 @@
         <h1>Văn bản pháp luật</h1>
         <div class="muted">Toàn văn, bản rút gọn có duyệt và đồ họa hiệu lực của các văn bản liên quan công tác KH&amp;CN, chuyển đổi số.</div>
     </div>
-    <a class="btn primary" href="/legal/new"><Icon Name="plus" Class="sm" />Thêm văn bản</a>
+    @if (CanEdit) { <a class="btn primary" href="/legal/new"><Icon Name="plus" Class="sm" />Thêm văn bản</a> }
 </div>
 
 <div class="legal-shell">
     @* ---------------------------------------------------------------- Danh sách *@
     <section class="legal-list">
+        <div class="seg" style="align-self:flex-start">
+            <button class="@(_treeMode ? "" : "on")" @onclick="() => _treeMode = false">Danh sách</button>
+            <button class="@(_treeMode ? "on" : "")" @onclick="() => _treeMode = true">Cây theo loại</button>
+        </div>
+        @if (_treeMode)
+        {
+            <div class="card" style="padding:10px">
+                <TreeView @ref="_tree" LoadChildren="LoadTreeAsync" Search="SearchTreeAsync" ExpandAllLimit="200"
+                          Placeholder="Số hiệu, tên văn bản, nội dung điều..." Empty="Chưa có văn bản nào." />
+            </div>
+        }
+        else
+        {
         <div class="search" style="max-width:none">
             <Icon Name="search" Class="sm" />
             <input class="input" placeholder="Số hiệu, tên, nội dung điều khoản..." @bind="_q" @bind:event="oninput" @bind:after="ReloadListAsync" />
@@ -47,6 +60,7 @@
                 <span class="t">@d.Title</span>
                 <span class="small muted">@ListMeta(d)</span>
             </button>
+        }
         }
     </section>
 
@@ -86,8 +100,8 @@
                     <span class="badge b-@Ui.EffectColor(d.Effect)">@Labels.Of(d.Effect)</span>
                     @foreach (var tag in Tags(d)) { <span class="badge b-gray">@tag</span> }
                     <span class="spacer"></span>
-                    <a class="btn sm" href="/legal/@d.Id/edit"><Icon Name="edit" Class="sm" />Sửa</a>
-                    <button class="btn sm ghost danger icon-only" title="Xóa văn bản" @onclick="DeleteAsync"><Icon Name="trash" Class="sm" /></button>
+                    @if (CanEdit) { <a class="btn sm" href="/legal/@d.Id/edit"><Icon Name="edit" Class="sm" />Sửa</a> }
+                    @if (IsAdmin) { <button class="btn sm ghost danger icon-only" title="Xóa văn bản" @onclick="DeleteAsync"><Icon Name="trash" Class="sm" /></button> }
                 </div>
                 <h2 style="font-size:19px;margin:10px 0">@d.Title</h2>
                 <div class="legal-meta">
@@ -98,8 +112,9 @@
                 </div>
                 <div class="row small mt" style="gap:8px">
                     <span class="muted">Tình trạng hiệu lực kiểm tra ngày @(d.EffectCheckedAt.HasValue ? Ui.D(d.EffectCheckedAt) : "—")</span>
-                    <button class="btn sm ghost" @onclick="MarkCheckedAsync" title="Ghi nhận đã đối chiếu tình trạng hiệu lực với nguồn chính thức hôm nay">Đã kiểm tra hôm nay</button>
+                    @if (CanEdit) { <button class="btn sm ghost" @onclick="MarkCheckedAsync" title="Ghi nhận đã đối chiếu tình trạng hiệu lực với nguồn chính thức hôm nay">Đã kiểm tra hôm nay</button> }
                     <span class="spacer"></span>
+                    @if (d.DocType == LegalDocType.Decision) { <a class="btn sm ghost" href="/documents?c=d:@d.Id" title="Hồ sơ thực hiện theo quyết định này"><Icon Name="folder" Class="sm" />Hồ sơ theo quyết định</a> }
                     @if (!string.IsNullOrEmpty(d.SourceUrl)) { <a href="@d.SourceUrl" target="_blank" rel="noopener"><Icon Name="link" Class="sm" /> Nguồn chính thức</a> }
                     @if (d.StoredFile != null)
                     {
@@ -114,10 +129,10 @@
                     {
                         <span class="badge b-@Ui.StatusColor(t.Status)" title="@t.Title">
                             <a href="/tasks/@t.Id" style="color:inherit">@t.Code</a>
-                            <button class="btn ghost icon-only" style="height:16px;width:16px;padding:0;color:inherit" title="Bỏ gắn" @onclick="() => UnlinkAsync(t)"><Icon Name="close" Class="sm" /></button>
+                            @if (CanEdit) { <button class="btn ghost icon-only" style="height:16px;width:16px;padding:0;color:inherit" title="Bỏ gắn" @onclick="() => UnlinkAsync(t)"><Icon Name="close" Class="sm" /></button> }
                         </span>
                     }
-                    <button class="btn sm ghost" @onclick="() => _linking = !_linking"><Icon Name="link" Class="sm" />Gắn với công việc</button>
+                    @if (CanEdit) { <button class="btn sm ghost" @onclick="() => _linking = !_linking"><Icon Name="link" Class="sm" />Gắn với công việc</button> }
                 </div>
                 @if (_linking)
                 {
@@ -150,7 +165,13 @@
                 <button class="@(_tab == "full" ? "on" : "")" @onclick='() => SetTab("full")'>Toàn văn</button>
                 <button class="@(_tab == "short" ? "on" : "")" @onclick='() => SetTab("short")'>Rút gọn</button>
                 <button class="@(_tab == "graphic" ? "on" : "")" @onclick='() => SetTab("graphic")'>Đồ họa</button>
+                <button class="@(_tab == "files" ? "on" : "")" @onclick='() => SetTab("files")'>Hồ sơ</button>
             </div>
+
+            @if (_tab == "files")
+            {
+                <AttachmentPanel LegalDocumentId="d.Id" ShowFolderLink="@(d.DocType == LegalDocType.Decision)" />
+            }
 
             @if (_tab == "full")
             {
@@ -162,38 +183,53 @@
                 {
                     <div class="legal-full">
                         <nav class="card toc" aria-label="Mục lục">
-                            <input class="input mb-s" placeholder="Tìm trong văn bản..." @bind="_ftq" @bind:event="oninput" />
-                            @foreach (var s in d.Sections.Where(s => s.Kind != LegalSectionKind.Article || Matches(s)))
-                            {
-                                var sec = s;
-                                <button class="@(s.Kind == LegalSectionKind.Article ? "" : "grp")" @onclick="() => ScrollToAsync(sec)">@LegalTextParser.Title(s)</button>
-                            }
+                            <div class="small muted">Mục lục: Chương → Mục → Điều → Khoản → Điểm</div>
+                            <TreeView @key="d.Id" LoadChildren="LoadTocAsync" OnSelect="TocSelectAsync" SelectedKey="@_flash" ExpandAllLimit="500" />
                         </nav>
                         <article class="card law-text">
                             <div class="row small muted mb-s">
-                                <span class="spacer">Toàn văn tách tự động từ văn bản nguồn; đánh số khoản, điểm giữ nguyên như bản gốc.</span>
-                                @if (!string.IsNullOrWhiteSpace(_ftq)) { <b>Đang lọc: @ShownArticles điều có "@_ftq"</b> }
+                                <span class="spacer">Toàn văn tách tự động từ văn bản nguồn; đánh số khoản, điểm giữ nguyên như bản gốc. Bấm <Icon Name="copy" Class="sm" /> để sao chép trích dẫn.</span>
+                                <input class="input no-print" style="max-width:240px" placeholder="Lọc điều có từ..." @bind="_ftq" @bind:event="oninput" />
                             </div>
+                            @if (!string.IsNullOrWhiteSpace(_ftq)) { <div class="small mb-s"><b>Đang lọc: @ShownArticles điều có "@_ftq"</b></div> }
                             @foreach (var s in d.Sections)
                             {
                                 if (s.Kind == LegalSectionKind.Article && !Matches(s)) continue;
                                 var sec = s;
-                                <div id="sec-@s.SortOrder" class="@(s.SortOrder == _flash ? "flash" : "")">
+                                var anchor = LegalTextParser.Anchor(s.SortOrder);
+                                <div id="@anchor" class="@Flash(anchor)">
                                     @if (s.Kind == LegalSectionKind.Article)
                                     {
-                                        <h4><span>@LegalTextParser.Title(s)</span><span class="spacer"></span><button class="btn sm ghost no-print" title="Sao chép trích dẫn" @onclick="() => CopyCiteAsync(sec)"><Icon Name="copy" Class="sm" /></button></h4>
-                                    }
-                                    else if (s.Kind == LegalSectionKind.Preamble)
-                                    {
-                                        <h4 class="muted">@s.Heading</h4>
+                                        var body = BodyOf(s);
+                                        <h4><span>@LegalTextParser.Title(s)</span><span class="spacer"></span><button class="btn sm ghost no-print" title="Sao chép trích dẫn Điều @s.Number" @onclick="() => CopyCiteAsync(sec)"><Icon Name="copy" Class="sm" /></button></h4>
+                                        @foreach (var line in body.Intro) { <p>@line</p> }
+                                        @foreach (var k in body.Clauses)
+                                        {
+                                            var clause = k;
+                                            var ka = LegalTextParser.Anchor(s.SortOrder, k.Number);
+                                            <div id="@ka" class="@Flash(ka)">
+                                                @for (int i = 0; i < k.Lines.Count; i++)
+                                                {
+                                                    <p class="i@(Math.Max(1, LegalTextParser.Indent(k.Lines[i])))">@k.Lines[i]@if (i == 0 && k.Number.Length > 0) { <button class="cite-copy no-print" title="Sao chép trích dẫn khoản @k.Number Điều @s.Number" @onclick="() => CopyCiteAsync(sec, clause.Number)"><Icon Name="copy" Class="sm" /></button> }</p>
+                                                }
+                                                @foreach (var p in k.Points)
+                                                {
+                                                    var point = p;
+                                                    var pa = LegalTextParser.Anchor(s.SortOrder, k.Number, p.Letter);
+                                                    <div id="@pa" class="@Flash(pa)">
+                                                        @for (int i = 0; i < p.Lines.Count; i++)
+                                                        {
+                                                            <p class="i@(Math.Max(2, LegalTextParser.Indent(p.Lines[i])))">@p.Lines[i]@if (i == 0) { <button class="cite-copy no-print" title="Sao chép trích dẫn điểm @p.Letter" @onclick="() => CopyCiteAsync(sec, clause.Number, point.Letter)"><Icon Name="copy" Class="sm" /></button> }</p>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
                                     }
                                     else
                                     {
-                                        <h3>@LegalTextParser.Title(s)</h3>
-                                    }
-                                    @foreach (var line in s.Body.Split('\n'))
-                                    {
-                                        <p class="i@(LegalTextParser.Indent(line))">@line</p>
+                                        @if (s.Kind == LegalSectionKind.Preamble) { <h4 class="muted">@s.Heading</h4> } else { <h3>@LegalTextParser.Title(s)</h3> }
+                                        @foreach (var line in s.Body.Split('\n')) { <p class="i@(LegalTextParser.Indent(line))">@line</p> }
                                     }
                                 </div>
                             }
@@ -207,7 +243,7 @@
                 {
                     <div class="card">
                         <div class="card-head"><h2>Lập / sửa bản rút gọn</h2></div>
-                        <div class="muted mb">Viết ngắn gọn bằng lời của người lập. Mỗi điểm chính và việc cần làm phải ghi điều khoản căn cứ (ví dụ "Điều 5, khoản 1"). Lưu xong bản rút gọn trở về trạng thái "Chưa duyệt".</div>
+                        <div class="muted mb">Viết ngắn gọn bằng lời của người lập. Mỗi điểm chính và việc cần làm phải ghi điều khoản căn cứ (ví dụ "Điều 5, khoản 2, điểm a"); căn cứ được đối chiếu với toàn văn đã nhập. Lưu xong bản rút gọn trở về trạng thái "Chưa duyệt".</div>
                         <div class="grid grid-2">
                             <label class="field"><span>Văn bản này nói về gì</span><textarea class="input" rows="4" @bind="_about"></textarea></label>
                             <label class="field"><span>Áp dụng với EEMC như thế nào</span><textarea class="input" rows="4" @bind="_applies"></textarea></label>
@@ -244,10 +280,10 @@
                             @if (d.SummaryState == SummaryState.Approved) { <text> · Duyệt bởi @d.SummaryApprovedBy · @Ui.Dt(d.SummaryApprovedAt)</text> }
                             @if (d.SummaryState == SummaryState.Draft) { <text> · Chưa được duyệt: luôn đối chiếu toàn văn trước khi sử dụng.</text> }
                         </span>
-                        <button class="btn sm" @onclick="StartEditSummary"><Icon Name="edit" Class="sm" />@(d.SummaryState == SummaryState.None ? "Lập bản rút gọn" : "Sửa bản rút gọn")</button>
-                        @if (_isAdmin && d.SummaryState == SummaryState.Draft) { <button class="btn sm primary" @onclick="ApproveAsync"><Icon Name="approve" Class="sm" />Duyệt</button> }
-                        @if (_isAdmin && d.SummaryState == SummaryState.Approved) { <button class="btn sm ghost" @onclick="RevokeAsync">Hủy duyệt</button> }
-                        @if (!_isAdmin && d.SummaryState == SummaryState.Draft) { <span class="small">Cần tài khoản quản trị để duyệt.</span> }
+                        @if (CanEdit) { <button class="btn sm" @onclick="StartEditSummary"><Icon Name="edit" Class="sm" />@(d.SummaryState == SummaryState.None ? "Lập bản rút gọn" : "Sửa bản rút gọn")</button> }
+                        @if (IsAdmin && d.SummaryState == SummaryState.Draft) { <button class="btn sm primary" @onclick="ApproveAsync"><Icon Name="approve" Class="sm" />Duyệt</button> }
+                        @if (IsAdmin && d.SummaryState == SummaryState.Approved) { <button class="btn sm ghost" @onclick="RevokeAsync">Hủy duyệt</button> }
+                        @if (!IsAdmin && d.SummaryState == SummaryState.Draft) { <span class="small">Cần tài khoản quản trị để duyệt.</span> }
                     </div>
                     @if (d.SummaryState == SummaryState.None)
                     {
@@ -292,7 +328,8 @@
                                                     <td>@(p.Due ?? "—")</td>
                                                     <td class="nowrap">
                                                         @if (task != null) { <a href="/tasks/@task.Id">@task.Code</a> <span class="badge b-@Ui.StatusColor(task.Status)">@Labels.Of(task.Status)</span> }
-                                                        else { <button class="btn sm" @onclick="() => CreateTask(pt)"><Icon Name="plus" Class="sm" />Tạo công việc</button> }
+                                                        else if (CanEdit) { <button class="btn sm" @onclick="() => CreateTask(pt)"><Icon Name="plus" Class="sm" />Tạo công việc</button> }
+                                                        else { <span class="tertiary">—</span> }
                                                     </td>
                                                 </tr>
                                             }
@@ -304,7 +341,7 @@
                     }
                 }
             }
-            else
+            else if (_tab == "graphic")
             {
                 <div class="row mb no-print">
                     <span class="muted spacer">Đồ họa dựng từ ngày tháng, quan hệ và mục lục đã nhập; thông tin còn trống được ghi rõ là chưa có.</span>
@@ -329,7 +366,7 @@
                 </div>
 
                 <div class="card mb">
-                    <div class="card-head"><h2>Quan hệ với văn bản khác</h2><span class="spacer"></span><a class="btn sm no-print" href="/legal/@d.Id/edit#relations"><Icon Name="edit" Class="sm" />Khai báo quan hệ</a></div>
+                    <div class="card-head"><h2>Quan hệ với văn bản khác</h2><span class="spacer"></span>@if (CanEdit) { <a class="btn sm no-print" href="/legal/@d.Id/edit#relations"><Icon Name="edit" Class="sm" />Khai báo quan hệ</a> }</div>
                     @{
                         var up = _relations.Where(r => (!r.Incoming && r.Relation.Kind is LegalRelationKind.BasedOn or LegalRelationKind.Guides)).ToList();
                         var down = _relations.Where(r => (r.Incoming && r.Relation.Kind is LegalRelationKind.BasedOn or LegalRelationKind.Guides)).ToList();
@@ -378,7 +415,8 @@
                         @if (chapters.Count == 0) { <div class="empty">Chưa có toàn văn để dựng cấu trúc.</div> }
                         else
                         {
-                            <div class="muted small mb-s">@chapters.Count(c => c.Chapter != "Không thuộc chương") chương · @chapters.Sum(c => c.Articles) điều</div>
+                            var bodies = d.Sections.Where(s => s.Kind == LegalSectionKind.Article).Select(BodyOf).ToList();
+                            <div class="muted small mb-s">@chapters.Count(c => c.Chapter != "Không thuộc chương") chương · @chapters.Sum(c => c.Articles) điều · @bodies.Sum(b => b.Clauses.Count(k => k.Number.Length > 0)) khoản · @bodies.Sum(b => b.Clauses.Sum(k => k.Points.Count)) điểm</div>
                             @foreach (var c in chapters)
                             {
                                 <div class="mb-s">
@@ -410,7 +448,6 @@
 @code {
     [Parameter] public int Id { get; set; }
     [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private static readonly LegalEffect[] FilterOrder = { LegalEffect.InEffect, LegalEffect.PartlyExpired, LegalEffect.NotYetEffective, LegalEffect.Expired, LegalEffect.Unknown };
 
@@ -421,9 +458,10 @@
     private LegalDocument? _doc;
     private List<LegalRelationView> _relations = new();
     private List<WorkTask> _tasks = new(), _taskHits = new();
-    private bool _isAdmin, _linking, _editSummary;
-    private string _userName = "";
-    private int _loadedId = -1, _flash = -1, _pendingScroll = -1;
+    private bool _linking, _editSummary;
+    private int _loadedId = -1;
+    /// <summary>Mã neo đang tô sáng / chờ cuộn tới (sec-…, sec-…-k2, sec-…-k2-a).</summary>
+    private string? _flash, _pendingScroll;
     private int ShownArticles => _doc?.Sections.Count(s => s.Kind == LegalSectionKind.Article && Matches(s)) ?? 0;
     private string? _about, _applies, _summaryError;
     private List<LegalPoint> _draft = new();
@@ -431,14 +469,8 @@
     protected override async Task OnInitializedAsync()
     {
         Legal.Changed += OnLegalChanged;
-        if (AuthState != null)
-        {
-            var user = (await AuthState).User;
-            _isAdmin = user.IsInRole("admin");
-            _userName = user.Identity?.Name ?? "";
-        }
         _loadedId = Id;
-        if (TabQuery is "short" or "graphic") _tab = TabQuery;
+        if (TabQuery is "short" or "graphic" or "files") _tab = TabQuery;
         await base.OnInitializedAsync();
     }
 
@@ -447,11 +479,114 @@
         if (_loadedId != Id)
         {
             _loadedId = Id;
-            _tab = TabQuery is "short" or "graphic" ? TabQuery : _tab;
+            _tab = TabQuery is "short" or "graphic" or "files" ? TabQuery : _tab;
             _editSummary = _linking = false;
             _ftq = "";
             await SafeLoadAsync();
         }
+        // Mở từ cây: /legal/5?tab=full&sec=12 → cuộn tới mục 12 của toàn văn
+        if (SecQuery is int sec && (sec != _lastSec || _loadedSecDoc != Id))
+        {
+            _lastSec = sec;
+            _loadedSecDoc = Id;
+            _tab = "full";
+            _ftq = "";
+            _flash = LegalTextParser.Anchor(sec);
+            _pendingScroll = _flash;
+        }
+    }
+
+    // ---------------------------------------------------------------- Cây Loại → Văn bản → Phần/Chương/Mục/Điều
+
+    [SupplyParameterFromQuery(Name = "sec")] public int? SecQuery { get; set; }
+    private int? _lastSec;
+    private int _loadedSecDoc;
+    private bool _treeMode;
+    private TreeView? _tree;
+    private readonly Dictionary<int, List<LegalSection>> _outlines = new();
+
+    private async Task<List<TreeNode>> LoadTreeAsync(TreeNode? parent)
+    {
+        if (parent == null)
+        {
+            _outlines.Clear();
+            var counts = await Legal.CountByTypeAsync();
+            return Enum.GetValues<LegalDocType>().Where(counts.ContainsKey).Select(t => new TreeNode
+            {
+                Key = $"ty:{(int)t}", Label = Labels.Of(t), Icon = "law", ChildCount = counts[t], Data = t
+            }).ToList();
+        }
+        if (parent.Data is LegalDocType type)
+        {
+            return (await Legal.GetByTypeAsync(type)).Select(x => new TreeNode
+            {
+                Key = $"d:{x.Doc.Id}", Label = x.Doc.ShortName, Href = $"/legal/{x.Doc.Id}", Icon = "file",
+                Badge = Labels.Of(x.Doc.Effect), BadgeColor = Ui.EffectColor(x.Doc.Effect), ChildCount = x.Sections, Data = x.Doc
+            }).ToList();
+        }
+        if (parent.Data is LegalDocument doc)
+        {
+            var top = BuildOutline(doc.Id, await OutlineAsync(doc.Id));
+            parent.ChildCount = top.Count;
+            return top;
+        }
+        return new();
+    }
+
+    private async Task<List<LegalSection>> OutlineAsync(int docId)
+    {
+        if (!_outlines.TryGetValue(docId, out var o)) _outlines[docId] = o = await Legal.GetOutlineAsync(docId);
+        return o;
+    }
+
+    private static int Rank(LegalSectionKind k) => k switch
+    {
+        LegalSectionKind.Part => 1, LegalSectionKind.Chapter => 2, LegalSectionKind.Section => 3, _ => 4
+    };
+
+    /// <summary>Lồng các mục theo thứ bậc Phần ⊃ Chương ⊃ Mục ⊃ Điều (phần mở đầu đứng riêng ở cấp đầu).</summary>
+    private static List<TreeNode> BuildOutline(int docId, List<LegalSection> outline)
+    {
+        var top = new List<TreeNode>();
+        var stack = new Stack<(TreeNode Node, int Rank)>();
+        foreach (var s in outline)
+        {
+            var node = new TreeNode
+            {
+                Key = $"s:{docId}:{s.SortOrder}", Label = LegalTextParser.Title(s), Href = $"/legal/{docId}?tab=full&sec={s.SortOrder}",
+                Children = s.Kind is LegalSectionKind.Article or LegalSectionKind.Preamble ? null : new List<TreeNode>()
+            };
+            int rank = s.Kind == LegalSectionKind.Preamble ? 0 : Rank(s.Kind);
+            while (stack.Count > 0 && (rank == 0 || stack.Peek().Rank >= rank)) stack.Pop();
+            if (stack.Count == 0) top.Add(node);
+            else { stack.Peek().Node.Children!.Add(node); stack.Peek().Node.ChildCount++; }
+            if (node.Children != null) stack.Push((node, rank));
+        }
+        return top;
+    }
+
+    /// <summary>Kết quả tìm: văn bản khớp và các điều khớp nội dung, kèm chuỗi khóa từ loại văn bản đến điều.</summary>
+    private async Task<List<IReadOnlyList<string>>> SearchTreeAsync(string q)
+    {
+        var paths = new List<IReadOnlyList<string>>();
+        foreach (var d in (await Legal.SearchAsync(q)).Take(20))
+            paths.Add(new[] { $"ty:{(int)d.DocType}", $"d:{d.Id}" });
+        foreach (var (docId, type, sortOrder) in await Legal.SearchArticlesAsync(q))
+        {
+            var chain = new List<string> { $"ty:{(int)type}", $"d:{docId}" };
+            void Find(List<TreeNode> nodes, List<string> trail)
+            {
+                foreach (var n in nodes)
+                {
+                    var t = new List<string>(trail) { n.Key };
+                    if (n.Key == $"s:{docId}:{sortOrder}") { chain.AddRange(t); return; }
+                    if (n.Children != null) Find(n.Children, t);
+                }
+            }
+            Find(BuildOutline(docId, await OutlineAsync(docId)), new());
+            if (chain.Count > 2) paths.Add(chain);
+        }
+        return paths;
     }
 
     protected override async Task LoadAsync()
@@ -465,6 +600,7 @@
             return;
         }
         _doc = await Legal.GetAsync(Id);
+        _bodies.Clear();
         if (_doc == null) { _upcoming = await Legal.GetUpcomingAsync(30); return; }
         _relations = await Legal.GetRelationsAsync(Id);
         _tasks = await Legal.GetLinkedTasksAsync(Id);
@@ -496,6 +632,7 @@
     {
         if (_editSummary) return; // không làm mất nội dung đang soạn
         await SafeLoadAsync();
+        if (_treeMode && _tree != null) await _tree.ReloadAsync();
         StateHasChanged();
     });
 
@@ -512,39 +649,101 @@
         return terms.All(hay.Contains);
     }
 
-    private async Task ScrollToAsync(LegalSection s)
+    private readonly Dictionary<int, ArticleBody> _bodies = new();
+
+    /// <summary>Khoản, điểm của một điều (tách một lần, dùng cho cả nội dung và mục lục).</summary>
+    private ArticleBody BodyOf(LegalSection s)
     {
-        _flash = s.SortOrder;
-        try { await JS.InvokeVoidAsync("eemc.scrollTo", $"sec-{s.SortOrder}"); } catch (JSDisconnectedException) { }
+        if (!_bodies.TryGetValue(s.SortOrder, out var b)) _bodies[s.SortOrder] = b = LegalTextParser.SplitBody(s.Body);
+        return b;
     }
 
-    private async Task CopyCiteAsync(LegalSection s)
+    private string? Flash(string anchor) => anchor == _flash ? "flash" : null;
+
+    private static string Snippet(string line, int max = 70)
+    {
+        var t = line.Trim();
+        return t.Length <= max ? t : t[..(max - 1)].TrimEnd() + "…";
+    }
+
+    /// <summary>Mục lục dạng cây: Phần/Chương/Mục/Điều nạp sẵn; mở Điều mới tách khoản, điểm.</summary>
+    private Task<List<TreeNode>> LoadTocAsync(TreeNode? parent)
     {
         var d = _doc!;
-        var cite = $"Điều {s.Number} {Labels.Of(d.DocType)}{(string.IsNullOrEmpty(d.Number) ? $" {d.Title}" : $" số {d.Number}")}";
+        if (parent == null)
+        {
+            var top = new List<TreeNode>();
+            var stack = new Stack<(TreeNode Node, int Rank)>();
+            foreach (var s in d.Sections)
+            {
+                var isArticle = s.Kind == LegalSectionKind.Article;
+                var node = new TreeNode
+                {
+                    Key = LegalTextParser.Anchor(s.SortOrder), Label = LegalTextParser.Title(s), Data = s,
+                    Children = isArticle || s.Kind == LegalSectionKind.Preamble ? null : new List<TreeNode>(),
+                    ChildCount = isArticle ? BodyOf(s).Clauses.Sum(k => k.Number.Length == 0 ? k.Points.Count : 1) : 0
+                };
+                int rank = s.Kind == LegalSectionKind.Preamble ? 0 : Rank(s.Kind);
+                while (stack.Count > 0 && (rank == 0 || stack.Peek().Rank >= rank)) stack.Pop();
+                if (stack.Count == 0) top.Add(node);
+                else { stack.Peek().Node.Children!.Add(node); stack.Peek().Node.ChildCount++; }
+                if (node.Children != null) stack.Push((node, rank));
+            }
+            return Task.FromResult(top);
+        }
+        if (parent.Data is not LegalSection a) return Task.FromResult(new List<TreeNode>());
+        var nodes = new List<TreeNode>();
+        foreach (var k in BodyOf(a).Clauses)
+        {
+            var points = k.Points.Select(p => new TreeNode
+            {
+                Key = LegalTextParser.Anchor(a.SortOrder, k.Number, p.Letter), Label = Snippet(p.Lines[0])
+            }).ToList();
+            if (k.Number.Length == 0) { nodes.AddRange(points); continue; } // điểm đứng ngay sau điều
+            nodes.Add(new TreeNode
+            {
+                Key = LegalTextParser.Anchor(a.SortOrder, k.Number), Label = "Khoản " + Snippet(k.Lines[0]),
+                Children = points, ChildCount = points.Count
+            });
+        }
+        return Task.FromResult(nodes);
+    }
+
+    private async Task TocSelectAsync(TreeNode n)
+    {
+        _flash = n.Key;
+        _ftq = "";
+        try { await JS.InvokeVoidAsync("eemc.scrollTo", n.Key); } catch (JSDisconnectedException) { }
+    }
+
+    /// <summary>Sao chép trích dẫn theo cách viết văn bản: "Điểm a khoản 2 Điều 5 Nghị định số 13/2019/NĐ-CP".</summary>
+    private async Task CopyCiteAsync(LegalSection s, string? clause = null, string? point = null)
+    {
+        var d = _doc!;
+        var cite = $"{LegalTextParser.Cite(s.Number, clause, point)} {Labels.Of(d.DocType)}{(string.IsNullOrEmpty(d.Number) ? $" {d.Title}" : $" số {d.Number}")}";
         var ok = await JS.InvokeAsync<bool>("eemc.copyText", cite);
         if (ok) UiSvc.Success($"Đã sao chép: {cite}"); else UiSvc.Show(cite);
     }
 
-    /// <summary>Bấm vào căn cứ "Điều 5, khoản 1" → mở tab Toàn văn tại Điều 5.</summary>
-    private async Task OpenCitationAsync(string? citation)
+    /// <summary>Bấm vào căn cứ "Điều 5, khoản 2, điểm a" → mở tab Toàn văn đúng điểm (hoặc khoản/điều gần nhất có trong toàn văn).</summary>
+    private Task OpenCitationAsync(string? citation)
     {
-        var no = LegalTextParser.ArticleOf(citation);
-        var s = no == null ? null : _doc?.Sections.FirstOrDefault(x => x.Kind == LegalSectionKind.Article && x.Number.Equals(no, StringComparison.OrdinalIgnoreCase));
-        if (s == null) { UiSvc.Show($"Không tìm thấy \"{citation}\" trong toàn văn đã nhập."); return; }
+        var (anchor, error) = LegalTextParser.Locate(_doc?.Sections ?? new(), LegalTextParser.ParseCitation(citation));
+        if (anchor == null) { UiSvc.Show($"Không tìm thấy \"{citation}\" trong toàn văn đã nhập{(error != null ? $" ({error})" : "")}."); return Task.CompletedTask; }
+        if (error != null) UiSvc.Show($"{error}; đang mở phần gần nhất.", ToastKind.Warning);
         _tab = "full";
         _ftq = "";
-        _flash = s.SortOrder;
-        _pendingScroll = s.SortOrder; // cuộn sau khi tab Toàn văn đã hiển thị
-        await Task.CompletedTask;
+        _flash = anchor;
+        _pendingScroll = anchor; // cuộn sau khi tab Toàn văn đã hiển thị
+        return Task.CompletedTask;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_pendingScroll < 0) return;
+        if (_pendingScroll == null) return;
         var target = _pendingScroll;
-        _pendingScroll = -1;
-        try { await JS.InvokeVoidAsync("eemc.scrollTo", $"sec-{target}"); } catch (JSDisconnectedException) { }
+        _pendingScroll = null;
+        try { await JS.InvokeVoidAsync("eemc.scrollTo", target); } catch (JSDisconnectedException) { }
     }
 
     // ---------------------------------------------------------------- Rút gọn
@@ -582,7 +781,7 @@
             !await UiSvc.ConfirmAsync("Bản rút gọn đang ở trạng thái ĐÃ DUYỆT.\nLưu thay đổi sẽ chuyển về \"Chưa duyệt\" và cần duyệt lại.", "Lưu")) return;
         try
         {
-            await Legal.SaveSummaryAsync(_doc.Id, _about, _applies, _draft, _userName);
+            await Legal.SaveSummaryAsync(_doc.Id, _about, _applies, _draft, UserName);
             _editSummary = false;
             UiSvc.Success("Đã lưu bản rút gọn (chưa duyệt).");
             await SafeLoadAsync();
@@ -596,7 +795,7 @@
         if (!await UiSvc.ConfirmAsync("Xác nhận đã đối chiếu bản rút gọn với toàn văn và DUYỆT?", "Duyệt")) return;
         try
         {
-            await Legal.ApproveSummaryAsync(_doc!.Id, _userName);
+            await Legal.ApproveSummaryAsync(_doc!.Id, UserName);
             UiSvc.Success("Đã duyệt bản rút gọn.");
         }
         catch (Exception ex) { UiSvc.Error(ex, "Không duyệt được"); }

@@ -1,0 +1,95 @@
+@* Cấu hình trợ lý AI — chỉ quản trị *@
+@inject AiSettingsService Ai
+@inject UiService UiSvc
+
+<div class="card" id="ai">
+    <h2>Trợ lý AI (Claude)</h2>
+    @if (_s == null) { <div class="muted">Đang tải...</div> }
+    else
+    {
+        <div class="muted small mb-s">Máy chủ gọi Claude API của Anthropic; khóa API được mã hóa, không gửi xuống trình duyệt. Chi phí tính theo token trên tài khoản Anthropic của đơn vị.</div>
+        <label class="field"><span>Khóa API Anthropic @(_keyInfo != null ? $"(đang dùng: {_keyInfo})" : "(chưa có)")</span>
+            <div class="row nowrap">
+                <input type="password" class="input" autocomplete="off" placeholder="sk-ant-..." @bind="_key" />
+                <button class="btn sm" @onclick="SaveKeyAsync" disabled="@string.IsNullOrWhiteSpace(_key)">Lưu khóa</button>
+                @if (_keyInfo != null) { <button class="btn sm ghost danger" @onclick="RemoveKeyAsync">Xóa khóa</button> }
+            </div>
+        </label>
+        <label class="check"><input type="checkbox" @bind="_s.Enabled" /> Bật trợ lý AI</label>
+        <div class="grid grid-2 mt-s">
+            <label class="field"><span>Mô hình</span>
+                <select class="input" @bind="_s.Model">@foreach (var m in AiSettings.Models) { <option value="@m.Id">@m.Label</option> }</select>
+            </label>
+            <label class="field"><span>Mức suy nghĩ</span>
+                <select class="input" @bind="_s.Effort">
+                    <option value="low">Thấp – nhanh, rẻ</option>
+                    <option value="medium">Vừa (mặc định)</option>
+                    <option value="high">Cao – kỹ hơn, tốn hơn</option>
+                </select>
+            </label>
+            <label class="field"><span>Ai được dùng</span>
+                <select class="input" @bind="_s.MinRole">
+                    <option value="@UserRole.Viewer">Mọi người dùng</option>
+                    <option value="@UserRole.Editor">Biên tập và Quản trị</option>
+                    <option value="@UserRole.Admin">Chỉ Quản trị</option>
+                </select>
+            </label>
+            <label class="field"><span>Hạn mức token / người / ngày</span><input type="number" min="10000" step="10000" class="input" @bind="_s.DailyTokensPerUser" /></label>
+            <label class="field"><span>Độ dài trả lời tối đa (token)</span><input type="number" min="1000" max="32000" step="500" class="input" @bind="_s.MaxOutputTokens" /></label>
+            <label class="field"><span>Số tin nhắn trước gửi kèm làm ngữ cảnh</span><input type="number" min="0" max="30" class="input" @bind="_s.HistoryMessages" /></label>
+        </div>
+        <div class="banner warn small mt-s">
+            Hai tùy chọn dưới đây gửi dữ liệu ra ngoài EEMC (máy chủ Anthropic). Chỉ bật khi đơn vị đã đồng ý với việc này.
+        </div>
+        <label class="check"><input type="checkbox" @bind="_s.InternalSearch" /> Tra cứu tài liệu nội bộ: gửi trích đoạn văn bản pháp luật, bản rút gọn đã duyệt, hồ sơ liên quan câu hỏi (tối đa @KnowledgeService.MaxSources đoạn) kèm câu hỏi</label>
+        <div class="row mt-s">
+            <label class="check"><input type="checkbox" @bind="_s.WebSearch" /> Cho phép tìm trên web, tối đa</label>
+            <input type="number" min="1" max="10" class="input" style="width:70px" @bind="_s.WebSearchMaxUses" /> <span class="small">lần mỗi câu hỏi</span>
+        </div>
+        <div class="row mt">
+            <button class="btn primary" @onclick="SaveAsync">Lưu cấu hình AI</button>
+            <span class="muted small">Câu hỏi bị bộ lọc an toàn của Claude từ chối sẽ được máy chủ Anthropic tự chuyển sang mô hình dự phòng (trừ Haiku).</span>
+        </div>
+    }
+</div>
+
+@code {
+    private AiSettings? _s;
+    private string? _keyInfo;
+    private string _key = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _s = await Ai.GetAsync();
+        _keyInfo = await Ai.DescribeApiKeyAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            await Ai.SaveAsync(_s!);
+            UiSvc.Success("Đã lưu cấu hình trợ lý AI. Tải lại trang để nút trợ lý cập nhật.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được cấu hình AI"); }
+    }
+
+    private async Task SaveKeyAsync()
+    {
+        try
+        {
+            await Ai.SetApiKeyAsync(_key);
+            _key = "";
+            _keyInfo = await Ai.DescribeApiKeyAsync();
+            UiSvc.Success("Đã lưu khóa API (mã hóa).");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được khóa"); }
+    }
+
+    private async Task RemoveKeyAsync()
+    {
+        if (!await UiSvc.ConfirmAsync("Xóa khóa API? Trợ lý AI sẽ ngừng hoạt động.", "Xóa", danger: true)) return;
+        await Ai.SetApiKeyAsync(null);
+        _keyInfo = await Ai.DescribeApiKeyAsync();
+    }
+}

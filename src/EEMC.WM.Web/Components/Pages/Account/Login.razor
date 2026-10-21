@@ -55,6 +55,9 @@
             case LoginResult.LockedOut:
                 _error = $"Tài khoản tạm khóa {UserService.LockoutTime.TotalMinutes:0} phút do nhập sai mật khẩu nhiều lần.";
                 return;
+            case LoginResult.Disabled:
+                _error = "Tài khoản đã bị khóa. Liên hệ quản trị hệ thống.";
+                return;
             case LoginResult.InvalidCredentials:
                 _error = "Tên đăng nhập hoặc mật khẩu không đúng.";
                 return;
@@ -72,7 +75,7 @@
             new(ClaimTypes.Name, user.DisplayName),
             new("username", user.UserName),
         };
-        if (user.IsAdmin) claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        claims.Add(new Claim(ClaimTypes.Role, Access.RoleName(user.Role)));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme));
         await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal,
             new AuthenticationProperties { IsPersistent = persistent, AllowRefresh = true });

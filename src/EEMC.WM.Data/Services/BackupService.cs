@@ -1,3 +1,4 @@
+using EEMC.WM.Core.Domain;
 using EEMC.WM.Data.Infrastructure;
 using Microsoft.Data.Sqlite;
 
@@ -123,6 +124,7 @@ public sealed class BackupService
     /// </summary>
     public async Task<BackupInfo> RestoreAsync(string backupFile)
     {
+        Access.Require(UserRole.Admin);
         if (!IsValidBackup(backupFile, out var err)) throw new InvalidOperationException(err);
         var safety = await BackupNowAsync(BackupFolder, "-truoc-phuc-hoi");
         await Task.Run(() =>

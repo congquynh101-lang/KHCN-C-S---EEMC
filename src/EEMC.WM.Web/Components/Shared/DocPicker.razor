@@ -1,0 +1,45 @@
+@* Hộp chọn nơi đến trên cây hồ sơ: chuyển/gắn tài liệu (ForFiles) hoặc chuyển thư mục *@
+@inject DocumentService Docs
+@inject TaskService Tasks
+
+<div class="overlay" @onclick="OnClose">
+    <div class="dialog" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <h2 style="margin:0">@Title</h2>
+            <span class="spacer"></span>
+            <button class="btn ghost icon-only" @onclick="OnClose"><Icon Name="close" /></button>
+        </div>
+        <div class="muted small mb-s">@(ForFiles ? "Chọn một thư mục, hoặc một dự án / công việc / quyết định để đặt trực tiếp." : "Chọn thư mục cha, hoặc một dự án / công việc / quyết định / Thư mục chung để đặt ở cấp gốc.")</div>
+        <div style="max-height:55vh;overflow:auto">
+            <TreeView LoadChildren="_src.LoadAsync" Search="_src.SearchAsync" OnSelect="Select" SelectedKey="@_key" ExpandAllLimit="150" Placeholder="Tìm thư mục..." />
+        </div>
+        <div class="dialog-foot">
+            <span class="spacer small">@(_label == null ? "Chưa chọn" : (_valid ? "Đã chọn: " + _label : _label + " — không chọn được làm nơi đến"))</span>
+            <button class="btn" @onclick="OnClose">Hủy</button>
+            <button class="btn primary" disabled="@(!_valid)" @onclick="() => OnPick.InvokeAsync(_key!)">Chọn</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "Chọn nơi đến";
+    /// <summary>true: nơi đặt tài liệu (không nhận "Thư mục chung" cấp gốc); false: nơi đặt thư mục.</summary>
+    [Parameter] public bool ForFiles { get; set; }
+    /// <summary>Khóa không được chọn (ví dụ thư mục đang chuyển).</summary>
+    [Parameter] public string? ExcludeKey { get; set; }
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private DocTree _src = default!;
+    private string? _key, _label;
+    private bool _valid;
+
+    protected override void OnInitialized() => _src = new DocTree(Docs, Tasks, showTrash: false);
+
+    private void Select(TreeNode n)
+    {
+        _key = n.Key;
+        _label = n.Label;
+        _valid = n.Key != ExcludeKey && (ForFiles ? DocTree.Target(n.Key) != null : DocTree.Container(n.Key) != null);
+    }
+}

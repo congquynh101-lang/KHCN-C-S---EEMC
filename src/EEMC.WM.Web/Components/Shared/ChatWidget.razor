@@ -1,0 +1,248 @@
+@* Trợ lý AI dạng khung thu gọn ở góc màn hình; gọi Claude qua máy chủ, khóa API không ra trình duyệt *@
+@implements IDisposable
+@inject ChatService Chat
+@inject ChatStore Store
+@inject UiService UiSvc
+@inject IJSRuntime JS
+
+@if (_visible)
+{
+    @if (!_open)
+    {
+        <button class="ai-fab no-print" title="Trợ lý AI (Claude)" @onclick="OpenAsync"><Icon Name="chat" /><span class="hide-mobile">Trợ lý AI</span></button>
+    }
+    else
+    {
+        <section class="ai-panel no-print" aria-label="Trợ lý AI">
+            <header class="ai-head">
+                <b class="spacer">Trợ lý AI</b>
+                <button class="btn sm ghost icon-only" title="Hội thoại trước" @onclick="ToggleHistoryAsync"><Icon Name="history" Class="sm" /></button>
+                <button class="btn sm ghost icon-only" title="Hội thoại mới" @onclick="NewChat"><Icon Name="plus" Class="sm" /></button>
+                <button class="btn sm ghost icon-only" title="Thu gọn" @onclick="() => _open = false"><Icon Name="chevron-down" Class="sm" /></button>
+            </header>
+
+            @if (!_available)
+            {
+                <div class="ai-body"><div class="empty">@_reason @if (Role == UserRole.Admin) { <a href="/settings#ai">Cấu hình trong Cài đặt</a> }</div></div>
+            }
+            else if (_showHistory)
+            {
+                <div class="ai-body">
+                    @if (_conversations.Count == 0) { <div class="empty">Chưa có hội thoại.</div> }
+                    @foreach (var c in _conversations)
+                    {
+                        var conv = c;
+                        <div class="timeline-item">
+                            <button class="tree-pick spacer" @onclick="() => LoadAsync(conv)">@c.Title</button>
+                            <span class="tertiary small nowrap">@Ui.D(c.UpdatedAt)</span>
+                            <button class="btn sm ghost icon-only" title="Xóa hội thoại" @onclick="() => DeleteAsync(conv)"><Icon Name="trash" Class="sm" /></button>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="ai-body" id="ai-body">
+                    @if (_messages.Count == 0)
+                    {
+                        <div class="muted small">
+                            Hỏi về quy định KH&amp;CN, văn bản pháp luật, hồ sơ trong phần mềm@(_web ? " hoặc thông tin trên web" : "").
+                            @(_internal ? "Trợ lý tra cứu tài liệu nội bộ trước và ghi nguồn." : "Tra cứu tài liệu nội bộ đang tắt (quản trị bật trong Cài đặt).")
+                        </div>
+                    }
+                    @foreach (var m in _messages)
+                    {
+                        <div class="ai-msg @(m.Role)">
+                            @if (m.Role == "user") { <div class="ai-bubble">@m.Text</div> }
+                            else
+                            {
+                                <div class="ai-bubble">
+                                    @if (m.Text.Length > 0) { @ChatText.Render(m.Text, m.Sources) }
+                                    else if (m.Error == null) { <span class="muted">@(string.IsNullOrEmpty(_status) ? "Đang suy nghĩ…" : _status)</span> }
+                                    @if (m.Error != null) { <div class="c-red small">@m.Error</div> }
+                                    @if (m.Sources.Count > 0)
+                                    {
+                                        <div class="ai-sources">
+                                            <div class="tertiary small">Nguồn trích dẫn</div>
+                                            @foreach (var s in m.Sources)
+                                            {
+                                                var external = s.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase);
+                                                <div class="small">[@s.N] <a href="@s.Url" target="@(external ? "_blank" : null)" rel="@(external ? "noopener noreferrer" : null)" title="@s.Quote">@s.Title</a>@(external ? " (web)" : "")</div>
+                                            }
+                                        </div>
+                                    }
+                                    @if (m.Consulted.Count > 0 && m.Sources.Count == 0 && m.Text.Length > 0)
+                                    {
+                                        <details class="small mt-s"><summary class="tertiary">Đã tra cứu @m.Consulted.Count tài liệu nội bộ</summary>
+                                            @foreach (var s in m.Consulted) { <div><a href="@s.Url">@s.Title</a></div> }
+                                        </details>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <footer class="ai-foot">
+                    <textarea id="ai-input" class="input" rows="2" placeholder="Nhập câu hỏi… (Enter để gửi, Shift+Enter xuống dòng)" @bind="_input" @bind:event="oninput" @onkeydown="OnKey" @onkeydown:preventDefault="_preventEnter" disabled="@_busy"></textarea>
+                    <div class="row">
+                        <span class="tertiary small spacer">Câu trả lời do AI tạo, có thể sai — đối chiếu nguồn trước khi dùng.</span>
+                        @if (_busy) { <button class="btn sm" @onclick="Stop">Dừng</button> }
+                        else { <button class="btn primary sm" @onclick="SendAsync" disabled="@string.IsNullOrWhiteSpace(_input)">Gửi</button> }
+                    </div>
+                </footer>
+            }
+        </section>
+    }
+}
+
+@code {
+    [CascadingParameter(Name = "UserRole")] public UserRole Role { get; set; } = UserRole.Viewer;
+
+    private sealed class ViewMsg
+    {
+        public string Role = "";
+        public string Text = "";
+        public List<ChatSource> Sources = new();
+        public List<ChatSource> Consulted = new();
+        public string? Error;
+    }
+
+    private sealed record StoredSources(List<ChatSource>? cited, List<ChatSource>? consulted);
+
+    private bool _visible, _open, _available, _showHistory, _busy, _preventEnter, _internal, _web;
+    private string? _reason, _status;
+    private string _input = "";
+    private int? _convId;
+    private List<ViewMsg> _messages = new();
+    private List<ChatConversation> _conversations = new();
+    private CancellationTokenSource? _cts;
+    private DateTime _lastRender;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var (available, reason) = await Chat.CheckAvailableAsync(Role);
+        _available = available;
+        _reason = reason;
+        // Người dùng thường chỉ thấy nút khi trợ lý dùng được; quản trị luôn thấy để biết cần cấu hình
+        _visible = available || Role == UserRole.Admin;
+    }
+
+    private async Task OpenAsync()
+    {
+        _open = true;
+        var s = await Chat_Settings.GetAsync();
+        _internal = s.InternalSearch;
+        _web = s.WebSearch;
+        await FocusAsync();
+    }
+
+    [Inject] private AiSettingsService Chat_Settings { get; set; } = default!;
+
+    private int UserId => Access.Current?.UserId ?? 0;
+
+    private async Task ToggleHistoryAsync()
+    {
+        _showHistory = !_showHistory;
+        if (_showHistory && UserId > 0) _conversations = await Store.GetConversationsAsync(UserId);
+    }
+
+    private void NewChat()
+    {
+        if (_busy) return;
+        _convId = null;
+        _messages = new();
+        _showHistory = false;
+    }
+
+    private async Task LoadAsync(ChatConversation c)
+    {
+        _convId = c.Id;
+        _messages = (await Store.GetMessagesAsync(UserId, c.Id)).Select(m =>
+        {
+            var v = new ViewMsg { Role = m.Role, Text = m.Content, Error = m.Error };
+            if (m.SourcesJson != null)
+            {
+                try
+                {
+                    var s = System.Text.Json.JsonSerializer.Deserialize<StoredSources>(m.SourcesJson, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    v.Sources = s?.cited ?? new();
+                    v.Consulted = s?.consulted ?? new();
+                }
+                catch (System.Text.Json.JsonException) { }
+            }
+            return v;
+        }).ToList();
+        _showHistory = false;
+        await ScrollAsync();
+    }
+
+    private async Task DeleteAsync(ChatConversation c)
+    {
+        if (!await UiSvc.ConfirmAsync($"Xóa hội thoại \"{c.Title}\"?", "Xóa", danger: true)) return;
+        await Store.DeleteConversationAsync(UserId, c.Id);
+        if (_convId == c.Id) NewChat();
+        _conversations = await Store.GetConversationsAsync(UserId);
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        _preventEnter = e.Key == "Enter" && !e.ShiftKey;
+        if (_preventEnter && !_busy && !string.IsNullOrWhiteSpace(_input)) await SendAsync();
+    }
+
+    private void Stop() => _cts?.Cancel();
+
+    private async Task SendAsync()
+    {
+        var actor = Access.Current;
+        if (_busy || actor == null || string.IsNullOrWhiteSpace(_input)) return;
+        var question = _input.Trim();
+        _input = "";
+        _busy = true;
+        _status = null;
+        _messages.Add(new ViewMsg { Role = "user", Text = question });
+        var answer = new ViewMsg { Role = "assistant" };
+        _messages.Add(answer);
+        _cts = new CancellationTokenSource();
+        await ScrollAsync();
+        try
+        {
+            var r = await Chat.AskAsync(actor, _convId, question,
+                async delta =>
+                {
+                    answer.Text += delta;
+                    if ((DateTime.UtcNow - _lastRender).TotalMilliseconds > 80) { _lastRender = DateTime.UtcNow; await InvokeAsync(StateHasChanged); await ScrollAsync(); }
+                },
+                status => { _status = status; return InvokeAsync(StateHasChanged); },
+                _cts.Token);
+            _convId = r.ConversationId == 0 ? _convId : r.ConversationId;
+            answer.Text = r.Text;
+            answer.Sources = r.Sources;
+            answer.Consulted = r.Consulted;
+            answer.Error = r.Error;
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không hỏi được trợ lý AI"); answer.Error = "Có lỗi khi hỏi trợ lý."; }
+        finally
+        {
+            _busy = false;
+            _status = null;
+            _cts?.Dispose();
+            _cts = null;
+        }
+        await ScrollAsync();
+        await FocusAsync();
+    }
+
+    private async Task ScrollAsync()
+    {
+        try { await JS.InvokeVoidAsync("eemc.scrollBottom", "ai-body"); } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+    }
+
+    private async Task FocusAsync()
+    {
+        await Task.Delay(30);
+        try { await JS.InvokeVoidAsync("eemc.focus", "ai-input"); } catch (JSDisconnectedException) { } catch (InvalidOperationException) { }
+    }
+
+    public void Dispose() => _cts?.Cancel();
+}

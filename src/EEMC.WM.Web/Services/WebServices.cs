@@ -72,6 +72,30 @@ public sealed class BackupWorker : BackgroundService
     }
 }
 
+/// <summary>Đọc dần nội dung tài liệu cũ (PDF/DOCX/TXT) để tìm kiếm theo nội dung, mỗi lần vài tệp để không nặng NAS.</summary>
+public sealed class DocumentIndexWorker : BackgroundService
+{
+    private readonly AttachmentService _attachments;
+
+    public DocumentIndexWorker(AttachmentService attachments) => _attachments = attachments;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); } catch (OperationCanceledException) { return; }
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(2));
+        do
+        {
+            try
+            {
+                using (Access.Use(Actor.System))
+                    while (!stoppingToken.IsCancellationRequested && await _attachments.IndexPendingAsync(5) > 0)
+                        await Task.Delay(1000, stoppingToken);
+            }
+            catch (Exception ex) { AppLog.Error(ex, "Đọc nội dung tài liệu (web)"); }
+        } while (await timer.WaitForNextTickAsync(stoppingToken));
+    }
+}
+
 public enum ToastKind { Info, Success, Warning, Error }
 
 public sealed record Toast(Guid Id, string Message, ToastKind Kind);
@@ -111,6 +135,7 @@ public sealed class UiService
     public void Error(Exception ex, string context)
     {
         if (ex is ValidationException v) { Show(string.Join(" ", v.Errors), ToastKind.Warning); return; }
+        if (ex is UnauthorizedAccessException ua) { Show(ua.Message, ToastKind.Warning); return; }
         if (ex is InvalidOperationException io) { Show(io.Message, ToastKind.Error); return; }
         AppLog.Error(ex, context);
         Show($"{context}. Chi tiết đã được ghi vào nhật ký lỗi.", ToastKind.Error);

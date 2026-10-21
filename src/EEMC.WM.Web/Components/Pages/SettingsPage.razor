@@ -10,8 +10,9 @@
 <div class="page-head">
     <h1>Cài đặt</h1>
     <span class="spacer"></span>
-    <button class="btn primary" @onclick="SaveAsync">Lưu cài đặt</button>
+    @if (IsAdmin) { <button class="btn primary" @onclick="SaveAsync">Lưu cài đặt</button> }
 </div>
+@if (!IsAdmin) { <div class="banner info">Cài đặt hệ thống chỉ tài khoản Quản trị thay đổi được. Bạn vẫn đổi được mật khẩu của mình ở mục "Tài khoản".</div> }
 
 @if (_s != null)
 {
@@ -90,6 +91,8 @@
                     </div>
                 }
             </div>
+            @if (IsAdmin)
+            {
             <label class="field"><span>Tên nhóm / mục</span><input class="input" @bind="_catName" /></label>
             <div class="row mt-s">
                 <button class="btn sm" @onclick="() => CatAction(1)">Thêm nhóm mới</button>
@@ -97,8 +100,11 @@
                 <button class="btn sm" @onclick="() => CatAction(3)">Đổi tên</button>
                 <button class="btn sm danger" @onclick="() => CatAction(4)">Ngừng sử dụng</button>
             </div>
+            }
         </div>
 
+        @if (IsAdmin)
+        {
         <div class="card">
             <h2>Sao lưu, phục hồi, chuyển dữ liệu</h2>
             <div class="muted">Dữ liệu trên máy chủ: <code>@Paths.DatabasePath</code></div>
@@ -122,6 +128,7 @@
                 @if (_importing) { <span class="muted">Đang nhập...</span> }
             </div>
         </div>
+        }
 
         <div class="card">
             <h2>Tài khoản</h2>
@@ -130,8 +137,14 @@
                 <label class="field"><span>Mật khẩu mới</span><input type="password" class="input" @bind="_pwNew" autocomplete="new-password" /></label>
                 <label class="field"><span>Nhập lại</span><input type="password" class="input" @bind="_pwNew2" autocomplete="new-password" /></label>
             </div>
-            <button class="btn mt-s" @onclick="ChangePassword">Đổi mật khẩu</button>
+            <div class="row mt-s">
+                <button class="btn" @onclick="ChangePassword">Đổi mật khẩu</button>
+                <span class="muted small">Vai trò: @Labels.Of(Role)</span>
+                @if (IsAdmin) { <a class="btn ghost" href="/users"><Icon Name="people" Class="sm" />Quản lý người dùng</a> }
+            </div>
         </div>
+
+        @if (IsAdmin) { <AiSettingsPanel /> }
 
         <div class="card">
             <h2>Phiên bản</h2>

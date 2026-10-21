@@ -41,6 +41,7 @@ public sealed class SettingsService
 
     public async Task SaveAsync(WorkSettings settings)
     {
+        Access.Require(UserRole.Admin);
         var errors = settings.Validate().ToList();
         if (errors.Count > 0) throw new ValidationException(errors);
 

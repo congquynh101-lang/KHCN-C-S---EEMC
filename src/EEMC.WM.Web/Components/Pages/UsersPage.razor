@@ -1,0 +1,133 @@
+@page "/users"
+@inherits LivePage
+@inject UserService Users
+
+<PageTitle>Người dùng – KHCN&amp;CĐS EEMC</PageTitle>
+<div class="page-head">
+    <div style="flex:1 1 320px;min-width:0">
+        <h1>Người dùng</h1>
+        <div class="muted">Tạo tài khoản, phân vai trò, khóa tài khoản. Quyền được kiểm tra trên máy chủ cho mọi thao tác.</div>
+    </div>
+</div>
+
+@if (!IsAdmin)
+{
+    <div class="card">Chỉ tài khoản Quản trị được quản lý người dùng.</div>
+}
+else
+{
+    <div class="grid grid-3 mb">
+        <div class="card"><b>Quản trị</b><div class="muted small">Toàn quyền: người dùng, cài đặt, sao lưu/phục hồi, duyệt bản rút gọn, xóa vĩnh viễn.</div></div>
+        <div class="card"><b>Biên tập</b><div class="muted small">Thêm, sửa công việc, dự án, hồ sơ, văn bản pháp luật; lập bản rút gọn (không duyệt).</div></div>
+        <div class="card"><b>Chỉ xem</b><div class="muted small">Xem và tìm kiếm; tạm hoãn nhắc việc; đổi mật khẩu của mình.</div></div>
+    </div>
+
+    <div class="card flush mb">
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr><th>Tên đăng nhập</th><th>Tên hiển thị</th><th>Vai trò</th><th>Khóa</th><th>Đăng nhập gần nhất</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var u in _rows)
+                    {
+                        var row = u;
+                        <tr>
+                            <td class="nowrap"><b>@u.UserName</b></td>
+                            <td><input class="input" @bind="row.DisplayName" /></td>
+                            <td>
+                                <select class="input" style="width:auto" @bind="row.Role">
+                                    @foreach (var r in Enum.GetValues<UserRole>().Reverse()) { <option value="@r">@Labels.Of(r)</option> }
+                                </select>
+                            </td>
+                            <td><label class="check"><input type="checkbox" @bind="row.IsDisabled" /> Khóa</label></td>
+                            <td class="nowrap small">@(u.LastLoginAt.HasValue ? Ui.Dt(u.LastLoginAt) : "—")</td>
+                            <td class="nowrap">
+                                <button class="btn sm" @onclick="() => SaveAsync(row)">Lưu</button>
+                                <button class="btn sm ghost" @onclick="() => StartPassword(row)">Đặt mật khẩu</button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    @if (_pwFor != null)
+    {
+        <div class="card mb">
+            <h2>Đặt mật khẩu mới cho @_pwFor.UserName</h2>
+            <div class="row">
+                <input type="password" class="input" style="max-width:280px" placeholder="Mật khẩu mới (tối thiểu 10 ký tự, có chữ và số)" autocomplete="new-password" @bind="_pw" />
+                <button class="btn primary" @onclick="SetPasswordAsync">Đặt mật khẩu</button>
+                <button class="btn" @onclick="() => _pwFor = null">Hủy</button>
+            </div>
+        </div>
+    }
+
+    <div class="card">
+        <h2>Thêm người dùng</h2>
+        <div class="grid grid-4">
+            <label class="field"><span>Tên đăng nhập</span><input class="input" autocomplete="off" @bind="_newUser" /></label>
+            <label class="field"><span>Tên hiển thị</span><input class="input" @bind="_newName" /></label>
+            <label class="field"><span>Mật khẩu ban đầu</span><input type="password" class="input" autocomplete="new-password" @bind="_newPw" /></label>
+            <label class="field"><span>Vai trò</span>
+                <select class="input" @bind="_newRole">@foreach (var r in Enum.GetValues<UserRole>().Reverse()) { <option value="@r">@Labels.Of(r)</option> }</select>
+            </label>
+        </div>
+        <button class="btn primary mt-s" @onclick="CreateAsync"><Icon Name="plus" Class="sm" />Thêm người dùng</button>
+        <div class="muted small mt-s">Gửi mật khẩu ban đầu cho người dùng qua kênh riêng; họ tự đổi ở Cài đặt → Tài khoản.</div>
+    </div>
+}
+
+@code {
+    private List<AppUser> _rows = new();
+    private AppUser? _pwFor;
+    private string _pw = "", _newUser = "", _newName = "", _newPw = "";
+    private UserRole _newRole = UserRole.Viewer;
+
+    protected override async Task LoadAsync()
+    {
+        if (IsAdmin) _rows = await Users.GetAllAsync();
+    }
+
+    private async Task SaveAsync(AppUser u)
+    {
+        try
+        {
+            await Users.UpdateUserAsync(u.Id, u.DisplayName, u.Role, u.IsDisabled);
+            UiSvc.Success($"Đã lưu {u.UserName}. Thay đổi vai trò có hiệu lực ngay với thao tác tiếp theo.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được người dùng"); }
+        await SafeLoadAsync();
+    }
+
+    private void StartPassword(AppUser u)
+    {
+        _pwFor = u;
+        _pw = "";
+    }
+
+    private async Task SetPasswordAsync()
+    {
+        try
+        {
+            await Users.AdminSetPasswordAsync(_pwFor!.Id, _pw);
+            UiSvc.Success($"Đã đặt mật khẩu mới cho {_pwFor.UserName}.");
+            _pwFor = null;
+            _pw = "";
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không đặt được mật khẩu"); }
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            var u = await Users.CreateUserAsync(_newUser, _newName, _newPw, _newRole);
+            UiSvc.Success($"Đã thêm {u.UserName} ({Labels.Of(u.Role)}).");
+            _newUser = _newName = _newPw = "";
+            _newRole = UserRole.Viewer;
+            await SafeLoadAsync();
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thêm được người dùng"); }
+    }
+}

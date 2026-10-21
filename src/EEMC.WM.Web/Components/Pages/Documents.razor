@@ -1,67 +1,503 @@
 @page "/documents"
 @inherits LivePage
 @inject AttachmentService Attachments
+@inject DocumentService Docs
 
 <PageTitle>Hồ sơ tài liệu – KHCN&amp;CĐS EEMC</PageTitle>
 <div class="page-head">
-    <h1>Hồ sơ tài liệu</h1>
-    <span class="spacer"></span>
-    <span class="muted">@_rows.Count tài liệu</span>
-</div>
-<div class="card mb" style="padding:12px 14px">
-    <div class="row">
-        <div class="search" style="max-width:360px">
-            <Icon Name="search" Class="sm" />
-            <input class="input" placeholder="Tên tài liệu, số văn bản, công việc, dự án..." @bind="_q" @bind:event="oninput" @bind:after="SafeLoadAsync" />
-        </div>
-        <select class="input" style="width:auto" @bind="_kind" @bind:after="SafeLoadAsync">
-            <option value="">Mọi loại tài liệu</option>
-            @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
-        </select>
-        <select class="input" style="width:auto" @bind="_status" @bind:after="SafeLoadAsync">
-            <option value="">Mọi tình trạng</option>
-            @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
-        </select>
+    <div style="flex:1 1 320px;min-width:0">
+        <h1>Hồ sơ tài liệu</h1>
+        <div class="muted">Theo dự án, công việc, quyết định hoặc thư mục chung. Một tài liệu có thể nằm ở nhiều nơi mà không lưu thêm bản sao.</div>
     </div>
-</div>
-<div class="muted mb">Thêm tài liệu trong trang chi tiết của từng công việc hoặc dự án (tab "Hồ sơ").</div>
-<div class="card flush">
-    <div class="table-wrap">
-        <table class="data">
-            <thead><tr><th>Tài liệu</th><th>Loại</th><th>Số văn bản</th><th>Tình trạng</th><th>Công việc / Dự án</th><th>Ngày thêm</th><th></th></tr></thead>
-            <tbody>
-                @foreach (var r in _rows)
-                {
-                    var a = r.Attachment;
-                    <tr>
-                        <td class="title">
-                            @if (a.StoredFile != null) { <a href="/files/@a.Id?inline=true" target="_blank"><Icon Name="file" Class="sm" /> @a.Name</a> <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)</span> }
-                            else if (a.Link!.StartsWith("http", StringComparison.OrdinalIgnoreCase)) { <a href="@a.Link" target="_blank" rel="noopener"><Icon Name="link" Class="sm" /> @a.Name</a> }
-                            else { <span><Icon Name="folder" Class="sm" /> @a.Name</span><div class="tertiary small">@a.Link</div> }
-                        </td>
-                        <td class="nowrap">@Labels.Of(a.Kind)</td>
-                        <td class="nowrap">@a.DocumentNumber</td>
-                        <td class="nowrap">@Labels.Of(a.DocumentStatus)</td>
-                        <td class="small">
-                            @if (a.TaskId.HasValue) { <a href="/tasks/@a.TaskId">@r.TaskCode</a> <span>@r.TaskTitle</span> }
-                            @if (a.ProjectId.HasValue) { <a href="/projects/@a.ProjectId">@r.ProjectName</a> }
-                        </td>
-                        <td class="nowrap small">@Ui.Dt(a.CreatedAt)</td>
-                        <td>@if (a.StoredFile != null) { <a class="btn sm ghost icon-only" href="/files/@a.Id" title="Tải về"><Icon Name="download" Class="sm" /></a> }</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-        @if (_rows.Count == 0 && !Loading) { <div class="empty">Không có tài liệu phù hợp.</div> }
+    <div class="seg">
+        <button class="@(_mode == "tree" ? "on" : "")" @onclick='() => _mode = "tree"'>Thư mục</button>
+        <button class="@(_mode == "search" ? "on" : "")" @onclick="OpenSearchAsync">Tìm kiếm</button>
     </div>
 </div>
 
+@if (_mode == "tree")
+{
+    <div class="docs-shell">
+        <div class="card" style="padding:10px">
+            <TreeView @ref="_tree" LoadChildren="_src.LoadAsync" Search="_src.SearchAsync" OnSelect="SelectNodeAsync" SelectedKey="@_sel"
+                      Placeholder="Tìm thư mục, tên hoặc nội dung tài liệu..." ExpandAllLimit="200" />
+        </div>
+        <section style="min-width:0">
+            @if (_sel == null)
+            {
+                <div class="card">
+                    <h2>Cách sắp xếp hồ sơ</h2>
+                    <div class="timeline-item"><Icon Name="project" Class="sm" /><div><b>Theo dự án KH&amp;CN</b><div class="muted">Thư mục của dự án và hồ sơ của từng công việc thuộc dự án.</div></div></div>
+                    <div class="timeline-item"><Icon Name="law" Class="sm" /><div><b>Theo quyết định</b><div class="muted">Các văn bản loại Quyết định trong mục Văn bản pháp luật; gom hồ sơ thực hiện theo từng quyết định.</div></div></div>
+                    <div class="timeline-item"><Icon Name="folder" Class="sm" /><div><b>Thư mục chung</b><div class="muted">Hồ sơ không gắn với dự án, công việc hay quyết định nào.</div></div></div>
+                    <div class="timeline-item"><Icon Name="copy" Class="sm" /><div><b>Không nhân bản tệp</b><div class="muted">Tải lên tệp đã có (trùng nội dung) chỉ gắn thêm nơi đặt cho tài liệu sẵn có; mỗi lần tải bản sửa là một phiên bản mới, bản cũ vẫn giữ.</div></div></div>
+                    <div class="muted small mt">Chọn một mục ở cây bên trái để xem, tải lên, tạo thư mục.@(CanEdit ? "" : " Tài khoản Chỉ xem chỉ xem và tải về.")</div>
+                </div>
+            }
+            else if (_sel == "trash")
+            {
+                <div class="card mb">
+                    <div class="card-head"><h2>Thùng rác</h2></div>
+                    <div class="muted small mb">Khôi phục được bất cứ lúc nào. Xóa vĩnh viễn (chỉ Quản trị) mới xóa tệp trên máy chủ.</div>
+                    @if (_trash == null) { <div class="muted">Đang tải...</div> }
+                    else if (_trash.Folders.Count == 0 && _trash.Files.Count == 0) { <div class="empty">Thùng rác trống.</div> }
+                    else
+                    {
+                        @foreach (var f in _trash.Folders)
+                        {
+                            var fo = f;
+                            <div class="timeline-item">
+                                <Icon Name="folder" Class="sm" /><span class="spacer">@f.Name <span class="tertiary small">· xóa @Ui.Dt(f.DeletedAt)</span></span>
+                                <button class="btn sm" @onclick="() => RestoreFolderAsync(fo)">Khôi phục</button>
+                                @if (IsAdmin) { <button class="btn sm ghost danger" @onclick="() => PurgeFolderAsync(fo)">Xóa vĩnh viễn</button> }
+                            </div>
+                        }
+                        @foreach (var r in _trash.Files)
+                        {
+                            var fi = r.Attachment;
+                            <div class="timeline-item">
+                                <Icon Name="file" Class="sm" />
+                                <span class="spacer"><button class="tree-pick" @onclick="() => _fileId = fi.Id">@fi.Name</button>
+                                    <span class="tertiary small">· xóa @Ui.Dt(fi.DeletedAt)@(r.Places.Count > 0 ? " · từng ở: " + string.Join("; ", r.Places.Select(p => p.Label)) : "")</span></span>
+                                <button class="btn sm" @onclick="() => RestoreFileAsync(fi)">Khôi phục</button>
+                                @if (IsAdmin) { <button class="btn sm ghost danger" @onclick="() => PurgeFileAsync(fi)">Xóa vĩnh viễn</button> }
+                            </div>
+                        }
+                    }
+                </div>
+            }
+            else if (_content == null)
+            {
+                <div class="card muted">@(_notFound ? "Không tìm thấy (có thể đã bị xóa)." : "Mở nhánh bên trái và chọn một dự án, công việc, quyết định hoặc thư mục.")</div>
+            }
+            else
+            {
+                <div class="card mb">
+                    <div class="small muted">
+                        @if (_folderPath.Count > 0)
+                        {
+                            <button class="tree-pick" @onclick="() => SelectKeyAsync(DocTree.KeyOf(_owner))">@_ownerLabel</button>
+                            @foreach (var f in _folderPath.Take(_folderPath.Count - 1))
+                            {
+                                var fo = f;
+                                <span> › </span><button class="tree-pick" @onclick='() => SelectKeyAsync($"f:{fo.Id}")'>@f.Name</button>
+                            }
+                        }
+                        else { <span>@(_owner.IsCommon ? "Hồ sơ" : OwnerKind(_owner))</span> }
+                    </div>
+                    <div class="row mt-s">
+                        <h2 style="margin:0" class="spacer"><Icon Name="folder" /> @(_folderPath.Count > 0 ? _folderPath[^1].Name : _ownerLabel)</h2>
+                        @if (_owner.ProjectId is int pid && _folderPath.Count == 0) { <a class="btn sm ghost" href="/projects/@pid">Mở dự án</a> }
+                        @if (_owner.TaskId is int tid && _folderPath.Count == 0) { <a class="btn sm ghost" href="/tasks/@tid">Mở công việc</a> }
+                        @if (_owner.LegalDocumentId is int lid && _folderPath.Count == 0) { <a class="btn sm ghost" href="/legal/@lid">Mở quyết định</a> }
+                    </div>
+                    @if (CanEdit)
+                    {
+                        <div class="row mt-s">
+                            @if (DocTree.Target(_sel) != null)
+                            {
+                                <label class="btn primary sm" style="cursor:pointer">
+                                    <Icon Name="upload" Class="sm" />Tải tệp lên
+                                    <InputFile OnChange="UploadAsync" multiple style="display:none" />
+                                </label>
+                            }
+                            <button class="btn sm" @onclick='() => StartFolderForm("new")'><Icon Name="plus" Class="sm" />Thư mục mới</button>
+                            @if (_folderPath.Count > 0)
+                            {
+                                <button class="btn sm" @onclick='() => StartFolderForm("rename")'><Icon Name="edit" Class="sm" />Đổi tên</button>
+                                <button class="btn sm" @onclick='() => _pickMode = "folder"'>Di chuyển…</button>
+                                <button class="btn sm ghost danger" @onclick="TrashFolderAsync"><Icon Name="trash" Class="sm" />Xóa</button>
+                            }
+                            @if (_busy) { <span class="muted small">Đang tải lên...</span> }
+                        </div>
+                        @if (_folderForm != null)
+                        {
+                            <div class="row mt-s">
+                                <input id="folder-name" class="input" style="max-width:360px" placeholder="Tên thư mục" @bind="_folderName" @bind:event="oninput" @onkeydown="FolderKey" />
+                                <button class="btn primary sm" @onclick="SaveFolderAsync">@(_folderForm == "new" ? "Tạo thư mục" : "Đổi tên")</button>
+                                <button class="btn sm" @onclick="() => _folderForm = null">Hủy</button>
+                            </div>
+                        }
+                        @if (DocTree.Target(_sel) == null) { <div class="muted small mt-s">Thư mục chung: tạo thư mục con rồi tải tài liệu vào thư mục đó.</div> }
+                    }
+                </div>
+
+                @if (_content.Folders.Count > 0)
+                {
+                    <div class="row mb">
+                        @foreach (var f in _content.Folders)
+                        {
+                            var fo = f;
+                            <button class="folder-tile" @onclick='() => SelectKeyAsync($"f:{fo.Folder.Id}")'>
+                                <Icon Name="folder" Class="sm" /> @f.Folder.Name
+                                <span class="tertiary small">@(f.Files > 0 ? $"{f.Files} tệp" : "")@(f.SubFolders > 0 ? $" · {f.SubFolders} thư mục" : "")</span>
+                            </button>
+                        }
+                    </div>
+                }
+
+                <div class="card flush">
+                    @if (_content.Files.Count == 0)
+                    {
+                        <div class="empty">Chưa có tài liệu ở đây.</div>
+                    }
+                    else
+                    {
+                        <div class="table-wrap">
+                            <table class="data">
+                                <thead><tr><th>Tài liệu</th><th class="hide-mobile">Loại</th><th>Số văn bản</th><th>Cập nhật</th><th>Nơi khác</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var r in _content.Files)
+                                    {
+                                        var row = r;
+                                        var a = r.Attachment;
+                                        var others = r.Places.Where(p => DocTree.KeyOf(p.Target) != _sel).ToList();
+                                        <tr>
+                                            <td class="title">
+                                                <button class="tree-pick" @onclick="() => _fileId = a.Id"><Icon Name="@(a.StoredFile != null ? "file" : "link")" Class="sm" /> @a.Name</button>
+                                                <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)@(a.CurrentVersion > 1 ? $" · v{a.CurrentVersion}" : "")</span>
+                                            </td>
+                                            <td class="nowrap small hide-mobile">@Labels.Of(a.Kind)</td>
+                                            <td class="nowrap small">@a.DocumentNumber</td>
+                                            <td class="nowrap small">@Ui.D(a.UpdatedAt)</td>
+                                            <td class="small" title="@string.Join("\n", others.Select(p => p.Label))">@(others.Count == 0 ? "—" : $"{others.Count} nơi")</td>
+                                            <td class="nowrap">
+                                                @if (a.StoredFile != null) { <a class="btn sm ghost icon-only" href="/files/@a.Id" title="Tải về"><Icon Name="download" Class="sm" /></a> }
+                                                @if (CanEdit)
+                                                {
+                                                    <button class="btn sm ghost icon-only" title="Chuyển sang nơi khác" @onclick="() => StartMoveFile(row)"><Icon Name="chevron-right" Class="sm" /></button>
+                                                    <button class="btn sm ghost icon-only" title="Gỡ khỏi nơi này (tài liệu vẫn ở các nơi khác)" @onclick="() => RemoveHereAsync(row)"><Icon Name="close" Class="sm" /></button>
+                                                    <button class="btn sm ghost danger icon-only" title="Đưa vào thùng rác" @onclick="() => TrashFileAsync(a)"><Icon Name="trash" Class="sm" /></button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            }
+        </section>
+    </div>
+}
+else
+{
+    <div class="card mb" style="padding:12px 14px">
+        <div class="row">
+            <div class="search" style="max-width:420px">
+                <Icon Name="search" Class="sm" />
+                <input class="input" placeholder="Tên, số văn bản, nội dung tài liệu, công việc, dự án..." @bind="_q" @bind:event="oninput" @bind:after="SafeLoadAsync" />
+            </div>
+            <select class="input" style="width:auto" @bind="_kind" @bind:after="SafeLoadAsync">
+                <option value="">Mọi loại tài liệu</option>
+                @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
+            </select>
+            <select class="input" style="width:auto" @bind="_status" @bind:after="SafeLoadAsync">
+                <option value="">Mọi tình trạng</option>
+                @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
+            </select>
+            <span class="spacer"></span>
+            <span class="muted">@_rows.Count tài liệu</span>
+        </div>
+    </div>
+    <div class="card flush">
+        <div class="table-wrap">
+            <table class="data">
+                <thead><tr><th>Tài liệu</th><th>Loại</th><th>Số văn bản</th><th>Tình trạng</th><th>Nơi đặt</th><th>Cập nhật</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var r in _rows)
+                    {
+                        var a = r.Attachment;
+                        <tr>
+                            <td class="title"><button class="tree-pick" @onclick="() => _fileId = a.Id"><Icon Name="@(a.StoredFile != null ? "file" : "link")" Class="sm" /> @a.Name</button> <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)</span></td>
+                            <td class="nowrap small">@Labels.Of(a.Kind)</td>
+                            <td class="nowrap small">@a.DocumentNumber</td>
+                            <td class="nowrap small">@Labels.Of(a.DocumentStatus)</td>
+                            <td class="small">@foreach (var p in r.Places) { <div><a href="@p.Href">@p.Label</a></div> }</td>
+                            <td class="nowrap small">@Ui.Dt(a.UpdatedAt)</td>
+                            <td>@if (a.StoredFile != null) { <a class="btn sm ghost icon-only" href="/files/@a.Id" title="Tải về"><Icon Name="download" Class="sm" /></a> }</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (_rows.Count == 0 && !Loading) { <div class="empty">Không có tài liệu phù hợp.</div> }
+        </div>
+    </div>
+}
+
+@if (_fileId is int fid)
+{
+    <DocFileDialog AttachmentId="fid" OnClose="() => _fileId = null" OnChanged="RefreshAsync" />
+}
+@if (_pickMode == "folder")
+{
+    <DocPicker Title="Chuyển thư mục đến" ForFiles="false" ExcludeKey="@_sel" OnClose="() => _pickMode = null" OnPick="MoveFolderAsync" />
+}
+else if (_pickMode == "file")
+{
+    <DocPicker Title="Chuyển tài liệu đến" ForFiles="true" OnClose="() => _pickMode = null" OnPick="MoveFileAsync" />
+}
+
 @code {
+    [SupplyParameterFromQuery(Name = "c")] public string? C { get; set; }
+
+    private DocTree _src = default!;
+    private TreeView? _tree;
+    private string _mode = "tree";
+    private string? _sel, _folderForm, _pickMode;
+    private string _folderName = "", _ownerLabel = "";
+    private ContainerContent? _content;
+    private TrashContent? _trash;
+    private DocOwner _owner;
+    private List<DocFolder> _folderPath = new();
+    private bool _busy, _notFound, _revealed;
+    private int? _fileId, _moveLinkId;
+    private CancellationTokenSource? _debounce;
+
+    // Tìm kiếm
     private string _q = "", _kind = "", _status = "";
     private List<AttachmentRow> _rows = new();
 
-    protected override async Task LoadAsync() =>
-        _rows = await Attachments.SearchAsync(_q,
-            Enum.TryParse<AttachmentKind>(_kind, out var k) ? k : null,
-            Enum.TryParse<DocumentStatus>(_status, out var s) ? s : null);
+    protected override async Task OnInitializedAsync()
+    {
+        _src = new DocTree(Docs, Tasks, showTrash: true);
+        Attachments.Changed += OnDocsChanged;
+        await base.OnInitializedAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Mở sẵn nơi chứa khi vào từ liên kết /documents?c=f:12
+        if (!_revealed && _tree != null && !string.IsNullOrEmpty(C))
+        {
+            _revealed = true;
+            await SelectKeyAsync(C);
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task LoadAsync()
+    {
+        if (_mode == "search")
+            _rows = await Attachments.SearchAsync(_q, Enum.TryParse<AttachmentKind>(_kind, out var k) ? k : null,
+                Enum.TryParse<DocumentStatus>(_status, out var s) ? s : null);
+    }
+
+    private async Task OpenSearchAsync()
+    {
+        _mode = "search";
+        await SafeLoadAsync();
+    }
+
+    private void OnDocsChanged(object? s, EventArgs e)
+    {
+        _debounce?.Cancel();
+        var cts = _debounce = new CancellationTokenSource();
+        _ = Task.Delay(250, cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled) return;
+            _ = InvokeAsync(async () => { await RefreshAsync(); StateHasChanged(); });
+        }, TaskScheduler.Default);
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (_mode == "search") { await SafeLoadAsync(); return; }
+        await LoadContentAsync();
+        if (_tree != null) await _tree.ReloadAsync();
+    }
+
+    // ---------------------------------------------------------------- Chọn nơi chứa
+
+    private async Task SelectNodeAsync(TreeNode n)
+    {
+        _sel = n.Key;
+        _folderForm = null;
+        await LoadContentAsync();
+    }
+
+    private async Task SelectKeyAsync(string key)
+    {
+        _sel = key;
+        _folderForm = null;
+        await LoadContentAsync();
+        if (_tree != null) await _tree.RevealAsync(await _src.PathAsync(key));
+    }
+
+    private async Task LoadContentAsync()
+    {
+        _content = null;
+        _trash = null;
+        _notFound = false;
+        _folderPath = new();
+        try
+        {
+            if (_sel == "trash")
+            {
+                if (CanEdit) _trash = await Docs.GetTrashAsync();
+                else _trash = new TrashContent();
+                return;
+            }
+            var c = DocTree.Container(_sel);
+            if (c == null) return;
+            var (owner, folderId) = c.Value;
+            if (folderId is int fid)
+            {
+                _folderPath = await Docs.GetFolderPathAsync(fid);
+                if (_folderPath.Count == 0 || _folderPath[^1].IsDeleted) { _notFound = true; return; }
+                owner = DocOwner.Of(_folderPath[0]);
+            }
+            _owner = owner;
+            _ownerLabel = await Docs.GetOwnerLabelAsync(owner);
+            _content = await Docs.GetContentAsync(owner, folderId);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tải được hồ sơ"); }
+    }
+
+    private static string OwnerKind(DocOwner o) => o.ProjectId != null ? "Hồ sơ dự án" : o.TaskId != null ? "Hồ sơ công việc" : o.LegalDocumentId != null ? "Hồ sơ theo quyết định" : "Hồ sơ";
+
+    // ---------------------------------------------------------------- Thao tác
+
+    private async Task Act(Func<Task> action, string ok)
+    {
+        try
+        {
+            await action();
+            if (ok.Length > 0) UiSvc.Success(ok);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thực hiện được"); }
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        if (DocTree.Target(_sel) is not DocTarget target) return;
+        _busy = true;
+        int added = 0, dup = 0;
+        try
+        {
+            foreach (var f in e.GetMultipleFiles(20))
+            {
+                if (f.Size > AttachmentService.MaxBytes) { UiSvc.Error($"{f.Name}: vượt quá {AttachmentService.MaxBytes / 1024 / 1024} MB."); continue; }
+                await using var s = f.OpenReadStream(AttachmentService.MaxBytes);
+                var r = await Attachments.UploadAsync(s, f.Name, f.Size, target);
+                if (r.Duplicate) { dup++; UiSvc.Show($"{f.Name}: trùng nội dung với \"{r.Attachment.Name}\" đã có — chỉ gắn thêm vào đây, không lưu bản sao."); }
+                else added++;
+            }
+            if (added > 0) UiSvc.Success($"Đã tải lên {added} tệp.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tải được tệp lên"); }
+        finally { _busy = false; }
+    }
+
+    private async Task StartFolderForm(string mode)
+    {
+        _folderForm = mode;
+        _folderName = mode == "rename" && _folderPath.Count > 0 ? _folderPath[^1].Name : "";
+        await Task.Delay(30);
+        try { await JS.InvokeVoidAsync("eemc.focus", "folder-name"); } catch (JSDisconnectedException) { }
+    }
+
+    private async Task FolderKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SaveFolderAsync();
+        else if (e.Key == "Escape") _folderForm = null;
+    }
+
+    private async Task SaveFolderAsync()
+    {
+        try
+        {
+            if (_folderForm == "new")
+            {
+                int? parent = _folderPath.Count > 0 ? _folderPath[^1].Id : null;
+                var f = await Docs.CreateFolderAsync(_folderName, parent, _owner);
+                UiSvc.Success($"Đã tạo thư mục \"{f.Name}\".");
+            }
+            else if (_folderPath.Count > 0)
+            {
+                await Docs.RenameFolderAsync(_folderPath[^1].Id, _folderName);
+                UiSvc.Success("Đã đổi tên thư mục.");
+            }
+            _folderForm = null;
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được thư mục"); }
+    }
+
+    private async Task TrashFolderAsync()
+    {
+        var f = _folderPath[^1];
+        if (!await UiSvc.ConfirmAsync($"Đưa thư mục \"{f.Name}\" và các thư mục con vào thùng rác?\nTài liệu chỉ nằm trong thư mục này cũng vào thùng rác; tài liệu còn ở nơi khác vẫn giữ ở đó.\nCó thể khôi phục từ Thùng rác.", "Xóa", danger: true)) return;
+        var parentKey = _folderPath.Count > 1 ? $"f:{_folderPath[^2].Id}" : DocTree.KeyOf(_owner);
+        await Act(() => Docs.TrashFolderAsync(f.Id), "Đã đưa thư mục vào thùng rác.");
+        await SelectKeyAsync(parentKey);
+    }
+
+    private async Task MoveFolderAsync(string key)
+    {
+        _pickMode = null;
+        var id = _folderPath[^1].Id;
+        var c = DocTree.Container(key);
+        if (c == null) return;
+        var (owner, folderId) = c.Value;
+        await Act(() => Docs.MoveFolderAsync(id, folderId, owner), "Đã chuyển thư mục.");
+        await SelectKeyAsync($"f:{id}");
+    }
+
+    private void StartMoveFile(AttachmentRow row)
+    {
+        _moveLinkId = row.Places.FirstOrDefault(p => DocTree.KeyOf(p.Target) == _sel)?.LinkId;
+        if (_moveLinkId != null) _pickMode = "file";
+    }
+
+    private async Task MoveFileAsync(string key)
+    {
+        _pickMode = null;
+        if (_moveLinkId is not int linkId || DocTree.Target(key) is not DocTarget t) return;
+        await Act(() => Docs.MovePlacementAsync(linkId, t), "Đã chuyển tài liệu.");
+    }
+
+    private async Task RemoveHereAsync(AttachmentRow row)
+    {
+        var here = row.Places.FirstOrDefault(p => DocTree.KeyOf(p.Target) == _sel);
+        if (here == null) return;
+        var last = row.Places.Count == 1;
+        if (!await UiSvc.ConfirmAsync($"Gỡ \"{row.Attachment.Name}\" khỏi nơi này?" + (last ? "\nĐây là nơi cuối cùng: tài liệu sẽ vào thùng rác." : "\nTài liệu vẫn còn ở " + (row.Places.Count - 1) + " nơi khác."), "Gỡ", danger: last)) return;
+        await Act(async () =>
+        {
+            var trashed = await Docs.RemovePlacementAsync(here.LinkId);
+            UiSvc.Success(trashed ? "Đã gỡ; tài liệu vào thùng rác." : "Đã gỡ khỏi nơi này.");
+        }, "");
+    }
+
+    private async Task TrashFileAsync(Attachment a)
+    {
+        if (!await UiSvc.ConfirmAsync($"Đưa \"{a.Name}\" vào thùng rác?\nTài liệu sẽ biến mất khỏi MỌI nơi đang đặt; có thể khôi phục từ Thùng rác.", "Xóa", danger: true)) return;
+        await Act(() => Docs.TrashFileAsync(a.Id), "Đã đưa tài liệu vào thùng rác.");
+    }
+
+    private Task RestoreFolderAsync(DocFolder f) => Act(() => Docs.RestoreFolderAsync(f.Id), "Đã khôi phục thư mục.");
+
+    private Task RestoreFileAsync(Attachment a) => Act(() => Docs.RestoreFileAsync(a.Id), "Đã khôi phục tài liệu.");
+
+    private async Task PurgeFolderAsync(DocFolder f)
+    {
+        if (!await UiSvc.ConfirmAsync($"XÓA VĨNH VIỄN thư mục \"{f.Name}\" và mọi thư mục con?\nTài liệu không còn ở nơi nào khác sẽ bị xóa cùng tệp trên máy chủ. Không thể hoàn tác.", "Xóa vĩnh viễn", danger: true)) return;
+        await Act(() => Docs.PurgeFolderAsync(f.Id), "Đã xóa vĩnh viễn thư mục.");
+    }
+
+    private async Task PurgeFileAsync(Attachment a)
+    {
+        if (!await UiSvc.ConfirmAsync($"XÓA VĨNH VIỄN \"{a.Name}\" cùng mọi phiên bản trên máy chủ?\nKhông thể hoàn tác.", "Xóa vĩnh viễn", danger: true)) return;
+        await Act(() => Docs.PurgeFileAsync(a.Id), "Đã xóa vĩnh viễn tài liệu.");
+    }
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    public override void Dispose()
+    {
+        Attachments.Changed -= OnDocsChanged;
+        _debounce?.Cancel();
+        base.Dispose();
+    }
 }

@@ -21,7 +21,7 @@
         }
         @ChildContent
     </div>
-    @if (!Compact)
+    @if (!Compact && Role >= UserRole.Editor)
     {
         <div class="task-actions">
             @if (Item.Status != WorkTaskStatus.InProgress && !StatusGroups.IsClosed(Item.Status))
@@ -41,6 +41,8 @@
 @code {
     [Parameter, EditorRequired] public WorkTask Item { get; set; } = default!;
     [Parameter] public PriorityAssessment? Assessment { get; set; }
+    /// <summary>Vai trò từ MainLayout: tài khoản Chỉ xem không thấy nút thao tác (máy chủ vẫn kiểm tra quyền).</summary>
+    [CascadingParameter(Name = "UserRole")] public UserRole Role { get; set; } = UserRole.Viewer;
     [Parameter] public bool ShowReasons { get; set; } = true;
     [Parameter] public bool Compact { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }

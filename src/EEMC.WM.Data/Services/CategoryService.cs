@@ -1,3 +1,4 @@
+using EEMC.WM.Data.Infrastructure;
 using EEMC.WM.Core.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -30,6 +31,7 @@ public sealed class CategoryService
 
     public async Task<Category> AddAsync(string name, int? parentId)
     {
+        Access.Require(UserRole.Admin);
         name = (name ?? "").Trim();
         if (name.Length == 0) throw new ValidationException(new[] { "Tên nhóm/mục không được để trống." });
         await using var db = await _factory.CreateDbContextAsync();
@@ -45,6 +47,7 @@ public sealed class CategoryService
 
     public async Task RenameAsync(int id, string name)
     {
+        Access.Require(UserRole.Admin);
         name = (name ?? "").Trim();
         if (name.Length == 0) throw new ValidationException(new[] { "Tên nhóm/mục không được để trống." });
         await using var db = await _factory.CreateDbContextAsync();
@@ -57,6 +60,7 @@ public sealed class CategoryService
     /// <summary>Ngừng sử dụng danh mục. Công việc đã gắn danh mục vẫn giữ nguyên liên kết.</summary>
     public async Task DeactivateAsync(int id)
     {
+        Access.Require(UserRole.Admin);
         await using var db = await _factory.CreateDbContextAsync();
         var c = await db.Categories.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy danh mục.");
         c.IsActive = false;

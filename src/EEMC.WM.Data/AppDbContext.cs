@@ -20,6 +20,11 @@ public class AppDbContext : DbContext
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<Attachment> Attachments => Set<Attachment>();
+    public DbSet<AttachmentLink> AttachmentLinks => Set<AttachmentLink>();
+    public DbSet<AttachmentVersion> AttachmentVersions => Set<AttachmentVersion>();
+    public DbSet<DocFolder> DocFolders => Set<DocFolder>();
+    public DbSet<ChatConversation> ChatConversations => Set<ChatConversation>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<TaskDependency> TaskDependencies => Set<TaskDependency>();
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<LegalDocument> LegalDocuments => Set<LegalDocument>();
@@ -185,8 +190,47 @@ public class AppDbContext : DbContext
             e.Property(x => x.Name).IsRequired().HasMaxLength(500);
             e.Property(x => x.Link).HasMaxLength(2000);
             e.Property(x => x.StoredFile).HasMaxLength(300);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.UploadedBy).HasMaxLength(200);
+            e.Property(x => x.CurrentVersion).HasDefaultValue(1);
+            e.HasIndex(x => x.Sha256);
+            e.HasIndex(x => x.IsDeleted);
+        });
+
+        b.Entity<AttachmentLink>(e =>
+        {
+            e.ToTable("AttachmentLinks");
+            e.HasOne<Attachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<DocFolder>().WithMany().HasForeignKey(x => x.FolderId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.AttachmentId);
+            e.HasIndex(x => x.FolderId);
             e.HasIndex(x => x.TaskId);
             e.HasIndex(x => x.ProjectId);
+            e.HasIndex(x => x.LegalDocumentId);
+        });
+
+        b.Entity<AttachmentVersion>(e =>
+        {
+            e.ToTable("AttachmentVersions");
+            e.Property(x => x.StoredFile).IsRequired().HasMaxLength(300);
+            e.Property(x => x.FileName).IsRequired().HasMaxLength(500);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.Property(x => x.UploadedBy).HasMaxLength(200);
+            e.HasOne<Attachment>().WithMany().HasForeignKey(x => x.AttachmentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.AttachmentId, x.VersionNo }).IsUnique();
+        });
+
+        b.Entity<DocFolder>(e =>
+        {
+            e.ToTable("DocFolders");
+            e.Property(x => x.Name).IsRequired().HasMaxLength(300);
+            e.Property(x => x.CreatedBy).HasMaxLength(200);
+            e.HasOne<DocFolder>().WithMany().HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(x => x.ParentId);
+            e.HasIndex(x => x.ProjectId);
+            e.HasIndex(x => x.TaskId);
+            e.HasIndex(x => x.LegalDocumentId);
         });
 
         b.Entity<TaskDependency>(e =>
@@ -201,6 +245,7 @@ public class AppDbContext : DbContext
             e.ToTable("Users");
             e.Property(x => x.UserName).IsRequired().HasMaxLength(100);
             e.HasIndex(x => x.UserName).IsUnique();
+            e.Ignore(x => x.IsAdmin);
         });
 
         // ---------------- Văn bản pháp luật
@@ -255,6 +300,25 @@ public class AppDbContext : DbContext
             e.HasOne<LegalDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(x => new { x.DocumentId, x.TaskId }).IsUnique();
             e.HasIndex(x => x.TaskId);
+        });
+
+        // ---------------- Trợ lý AI
+        b.Entity<ChatConversation>(e =>
+        {
+            e.ToTable("ChatConversations");
+            e.Property(x => x.Title).IsRequired().HasMaxLength(300);
+            e.HasIndex(x => new { x.UserId, x.UpdatedAt });
+        });
+
+        b.Entity<ChatMessage>(e =>
+        {
+            e.ToTable("ChatMessages");
+            e.Property(x => x.Role).IsRequired().HasMaxLength(16);
+            e.Property(x => x.Model).HasMaxLength(64);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasOne<ChatConversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.ConversationId, x.Id });
+            e.HasIndex(x => x.CreatedAt);
         });
 
         b.Entity<AppNotification>(e =>

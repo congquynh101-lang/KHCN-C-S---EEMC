@@ -1,3 +1,4 @@
+using EEMC.WM.Data.Infrastructure;
 using EEMC.WM.Core.Domain;
 using EEMC.WM.Core.Services;
 using EEMC.WM.Core.Text;
@@ -80,6 +81,33 @@ public sealed class TaskService
         return list;
     }
 
+    /// <summary>
+    /// Một cấp của cây công việc (chỉ tải cấp được mở): con trực tiếp của <paramref name="parentId"/>, hoặc công việc gốc
+    /// của dự án <paramref name="projectId"/> (null = không thuộc dự án) khi parentId null. Kèm số con của từng công việc.
+    /// </summary>
+    public async Task<List<(WorkTask Task, int ChildCount)>> GetTreeLevelAsync(int? projectId, int? parentId, bool includeClosed, int take = 500)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        IQueryable<WorkTask> Open(IQueryable<WorkTask> q) => includeClosed ? q
+            : q.Where(t => t.Status != WorkTaskStatus.Completed && t.Status != WorkTaskStatus.Cancelled);
+        var q = Open(db.Tasks.AsNoTracking().Where(t => !t.IsDeleted));
+        q = parentId.HasValue ? q.Where(t => t.ParentId == parentId) : q.Where(t => t.ParentId == null && t.ProjectId == projectId);
+        var list = await q.OrderBy(t => t.PlannedStart ?? t.DueAt).ThenBy(t => t.Id).Take(take).ToListAsync();
+        var ids = list.Select(t => t.Id).ToList();
+        var counts = await Open(db.Tasks.Where(t => !t.IsDeleted && t.ParentId != null && ids.Contains(t.ParentId.Value)))
+            .GroupBy(t => t.ParentId!.Value).Select(g => new { g.Key, N = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.N);
+        return list.Select(t => (t, counts.GetValueOrDefault(t.Id))).ToList();
+    }
+
+    /// <summary>Số công việc gốc (không phải việc con) theo dự án; khóa 0 = không thuộc dự án.</summary>
+    public async Task<Dictionary<int, int>> CountRootTasksByProjectAsync(bool includeClosed)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        var q = db.Tasks.Where(t => !t.IsDeleted && t.ParentId == null);
+        if (!includeClosed) q = q.Where(t => t.Status != WorkTaskStatus.Completed && t.Status != WorkTaskStatus.Cancelled);
+        return await q.GroupBy(t => t.ProjectId ?? 0).Select(g => new { g.Key, N = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.N);
+    }
+
     /// <summary>Các công việc cấp trên, từ công việc gốc đến công việc cha trực tiếp.</summary>
     public async Task<List<WorkTask>> GetAncestorsAsync(int taskId)
     {
@@ -158,6 +186,7 @@ public sealed class TaskService
     /// <summary>Tạo công việc con, kế thừa dự án/nhóm/người giao của công việc cha.</summary>
     public async Task<WorkTask> CreateSubtaskAsync(int parentId, WorkTask child)
     {
+        Access.Require(UserRole.Editor);
         var parent = await GetAsync(parentId) ?? throw new InvalidOperationException("Không tìm thấy công việc cha.");
         await using (var db = await _factory.CreateDbContextAsync())
             await ValidateParentAsync(db, null, parentId);
@@ -212,6 +241,7 @@ public sealed class TaskService
 
     public async Task AddDependencyAsync(int taskId, int dependsOnTaskId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         if (!await db.Tasks.AnyAsync(t => t.Id == taskId) || !await db.Tasks.AnyAsync(t => t.Id == dependsOnTaskId))
             throw new InvalidOperationException("Không tìm thấy công việc.");
@@ -228,6 +258,7 @@ public sealed class TaskService
 
     public async Task RemoveDependencyAsync(int taskId, int dependsOnTaskId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         await db.TaskDependencies.Where(d => d.TaskId == taskId && d.DependsOnTaskId == dependsOnTaskId).ExecuteDeleteAsync();
         RaiseChanged();
@@ -408,6 +439,7 @@ public sealed class TaskService
 
     public async Task<WorkTask> CreateAsync(WorkTask input)
     {
+        Access.Require(UserRole.Editor);
         var errors = TaskValidator.Validate(input);
         if (errors.Count > 0) throw new ValidationException(errors);
 
@@ -460,6 +492,7 @@ public sealed class TaskService
 
     public async Task<WorkTask> UpdateAsync(WorkTask input)
     {
+        Access.Require(UserRole.Editor);
         var errors = TaskValidator.Validate(input);
         if (errors.Count > 0) throw new ValidationException(errors);
 
@@ -550,6 +583,7 @@ public sealed class TaskService
     /// <summary>Đổi trạng thái. Trạng thái Hoàn thành chỉ được gọi sau khi người dùng xác nhận trên giao diện.</summary>
     public async Task ChangeStatusAsync(int id, WorkTaskStatus status, string? note = null)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         var t = await db.Tasks.FirstOrDefaultAsync(x => x.Id == id)
                 ?? throw new InvalidOperationException("Không tìm thấy công việc.");
@@ -572,6 +606,7 @@ public sealed class TaskService
 
     public async Task AddCommentAsync(int taskId, string text)
     {
+        Access.Require(UserRole.Editor);
         if (string.IsNullOrWhiteSpace(text)) throw new ValidationException(new[] { "Nội dung trao đổi không được để trống." });
         await using var db = await _factory.CreateDbContextAsync();
         if (!await db.Tasks.AnyAsync(t => t.Id == taskId)) throw new InvalidOperationException("Không tìm thấy công việc.");
@@ -581,6 +616,7 @@ public sealed class TaskService
 
     public async Task<WorkTask> DuplicateAsync(int id)
     {
+        Access.Require(UserRole.Editor);
         var src = await GetAsync(id) ?? throw new InvalidOperationException("Không tìm thấy công việc.");
         var copy = src.CloneForCopy();
         copy.Title = src.Title;
@@ -595,6 +631,7 @@ public sealed class TaskService
 
     public async Task SnoozeAsync(int id, DateTime until)
     {
+        Access.Require(UserRole.Viewer);
         await using var db = await _factory.CreateDbContextAsync();
         var t = await db.Tasks.FirstOrDefaultAsync(x => x.Id == id);
         if (t == null) return;
@@ -604,6 +641,7 @@ public sealed class TaskService
 
     public async Task SetPlannedStartAsync(int id, DateTime? plannedStart)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         var t = await db.Tasks.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy công việc.");
         var now = _clock.Now;
@@ -617,6 +655,7 @@ public sealed class TaskService
     /// <summary>Chuyển vào thùng rác (có thể phục hồi).</summary>
     public async Task MoveToTrashAsync(IReadOnlyCollection<int> ids)
     {
+        Access.Require(UserRole.Editor);
         if (ids.Count == 0) return;
         await using var db = await _factory.CreateDbContextAsync();
         var now = _clock.Now;
@@ -633,6 +672,7 @@ public sealed class TaskService
 
     public async Task RestoreAsync(IReadOnlyCollection<int> ids)
     {
+        Access.Require(UserRole.Editor);
         if (ids.Count == 0) return;
         await using var db = await _factory.CreateDbContextAsync();
         var now = _clock.Now;
@@ -650,10 +690,11 @@ public sealed class TaskService
     /// <summary>Xóa vĩnh viễn các công việc đang nằm trong thùng rác.</summary>
     public async Task PurgeAsync(IReadOnlyCollection<int> ids)
     {
+        Access.Require(UserRole.Admin);
         if (ids.Count == 0) return;
         await using var db = await _factory.CreateDbContextAsync();
         await using var tx = await db.Database.BeginTransactionAsync();
-        var rows = await db.Tasks.Where(t => ids.Contains(t.Id) && t.IsDeleted).Select(t => new { t.Id, t.SyncId }).ToListAsync();
+        var rows = await db.Tasks.Where(t => ids.Contains(t.Id) && t.IsDeleted).Select(t => new { t.Id, t.SyncId, t.Code }).ToListAsync();
         var valid = rows.Select(r => r.Id).ToList();
         // Dấu vết xóa để các máy đồng bộ cũng xóa vĩnh viễn
         foreach (var r in rows)
@@ -667,7 +708,8 @@ public sealed class TaskService
         await db.TaskHistories.Where(h => valid.Contains(h.TaskId)).ExecuteDeleteAsync();
         await db.ReminderLogs.Where(r => valid.Contains(r.TaskId)).ExecuteDeleteAsync();
         await db.TaskDependencies.Where(d => valid.Contains(d.TaskId) || valid.Contains(d.DependsOnTaskId)).ExecuteDeleteAsync();
-        await db.Attachments.Where(a => a.TaskId != null && valid.Contains(a.TaskId.Value)).ExecuteUpdateAsync(s => s.SetProperty(a => a.TaskId, (int?)null));
+        // Hồ sơ của công việc: thư mục thành thư mục chung, tài liệu không còn nơi nào khác vào thùng rác (không mất tệp)
+        foreach (var r in rows) await DocumentService.DetachOwnerAsync(db, new DocOwner(TaskId: r.Id), r.Code, _clock.Now);
         await db.Notifications.Where(n => n.TaskId != null && valid.Contains(n.TaskId.Value)).ExecuteDeleteAsync();
         await db.Tasks.Where(t => t.ParentId != null && valid.Contains(t.ParentId.Value)).ExecuteUpdateAsync(s => s.SetProperty(t => t.ParentId, (int?)null));
         await db.Tasks.Where(t => valid.Contains(t.Id)).ExecuteDeleteAsync();

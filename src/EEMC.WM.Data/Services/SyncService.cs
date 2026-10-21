@@ -180,6 +180,7 @@ public sealed class SyncService
 
     public async Task<SyncResult> RunAsync(CancellationToken ct = default)
     {
+        Access.Require(UserRole.Admin);
         var s = _settings.Current;
         if (!s.SyncEnabled || string.IsNullOrWhiteSpace(s.SyncFolder))
         {

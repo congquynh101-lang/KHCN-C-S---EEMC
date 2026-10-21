@@ -1,0 +1,231 @@
+@* Cây phân cấp dùng chung: mặc định thu gọn, mở nút nào mới tải cấp con của nút đó *@
+@inject UiService UiSvc
+
+@if (ShowToolbar)
+{
+<div class="tree-bar">
+    @if (Search != null)
+    {
+        <div class="search" style="max-width:none;flex:1 1 220px">
+            <Icon Name="search" Class="sm" />
+            <input class="input" placeholder="@Placeholder" @bind="_q" @bind:event="oninput" @onkeydown="OnSearchKey" />
+        </div>
+        <button class="btn sm" @onclick="SearchAsync" disabled="@_busy">Tìm</button>
+    }
+    <button class="btn sm ghost" @onclick="ExpandAllAsync" disabled="@_busy" title="Mở mọi cấp (tối đa @ExpandAllLimit mục)"><Icon Name="chevron-down" Class="sm" />Mở tất cả</button>
+    <button class="btn sm ghost" @onclick="CollapseAll"><Icon Name="chevron-right" Class="sm" />Thu gọn tất cả</button>
+</div>
+}
+@if (!string.IsNullOrEmpty(_note)) { <div class="small muted mb-s">@_note</div> }
+
+<div class="tree" role="tree">
+    @if (_roots == null) { <div class="muted small">Đang tải...</div> }
+    else if (_roots.Count == 0) { <div class="empty">@Empty</div> }
+    else { foreach (var n in _roots) { @RenderNode(n, 0) } }
+</div>
+
+@code {
+    /// <summary>Tải các nút con (null = các nút gốc).</summary>
+    [Parameter, EditorRequired] public Func<TreeNode?, Task<List<TreeNode>>> LoadChildren { get; set; } = default!;
+    /// <summary>Tìm kiếm phía máy chủ: trả về đường dẫn khóa từ nút gốc đến từng nút khớp.</summary>
+    [Parameter] public Func<string, Task<List<IReadOnlyList<string>>>>? Search { get; set; }
+    /// <summary>Nút thao tác bên phải mỗi dòng (hiện theo quyền).</summary>
+    [Parameter] public RenderFragment<TreeNode>? Actions { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Tìm trong cây...";
+    [Parameter] public string Empty { get; set; } = "Chưa có dữ liệu.";
+    [Parameter] public int ExpandAllLimit { get; set; } = 300;
+    /// <summary>Chọn nút (nút không có Href): bấm tên nút để chọn, đồng thời mở nút nếu đang thu gọn.</summary>
+    [Parameter] public EventCallback<TreeNode> OnSelect { get; set; }
+    [Parameter] public string? SelectedKey { get; set; }
+    [Parameter] public bool ShowToolbar { get; set; } = true;
+
+    private List<TreeNode>? _roots;
+    private string _q = "";
+    private string? _note;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    /// <summary>Tải lại từ đầu nhưng giữ các nhánh đang mở.</summary>
+    public async Task ReloadAsync()
+    {
+        var open = new HashSet<string>();
+        void Collect(IEnumerable<TreeNode>? nodes)
+        {
+            foreach (var n in nodes ?? Enumerable.Empty<TreeNode>())
+                if (n.Expanded) { open.Add(n.Key); Collect(n.Children); }
+        }
+        Collect(_roots);
+        try
+        {
+            var roots = await LoadChildren(null);
+            foreach (var r in roots) r.Level = 0;
+            _roots = roots;
+            await ReopenAsync(_roots, open);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tải được cây"); _roots ??= new(); }
+        StateHasChanged();
+    }
+
+    private async Task ReopenAsync(List<TreeNode> nodes, HashSet<string> open)
+    {
+        foreach (var n in nodes.Where(n => open.Contains(n.Key)))
+        {
+            await EnsureChildrenAsync(n);
+            n.Expanded = true;
+            if (n.Children != null) await ReopenAsync(n.Children, open);
+        }
+    }
+
+    private async Task EnsureChildrenAsync(TreeNode n)
+    {
+        if (n.Children != null || n.ChildCount == 0) return;
+        n.Loading = true;
+        try
+        {
+            var children = await LoadChildren(n);
+            foreach (var c in children) c.Level = n.Level + 1;
+            n.Children = children;
+        }
+        finally { n.Loading = false; }
+    }
+
+    private async Task ToggleAsync(TreeNode n)
+    {
+        if (n.Expanded) { n.Expanded = false; return; }
+        try
+        {
+            n.Expanded = true;
+            StateHasChanged();
+            await EnsureChildrenAsync(n);
+        }
+        catch (Exception ex) { n.Expanded = false; UiSvc.Error(ex, "Không tải được cấp con"); }
+    }
+
+    private async Task ExpandAllAsync()
+    {
+        if (_roots == null) return;
+        _busy = true;
+        int opened = 0;
+        bool capped = false;
+        var queue = new Queue<TreeNode>(_roots);
+        try
+        {
+            while (queue.Count > 0)
+            {
+                var n = queue.Dequeue();
+                if (!n.HasChildren) continue;
+                if (opened >= ExpandAllLimit) { capped = true; break; }
+                await EnsureChildrenAsync(n);
+                n.Expanded = true;
+                opened += n.Children?.Count ?? 0;
+                foreach (var c in n.Children ?? new()) queue.Enqueue(c);
+            }
+            _note = capped ? $"Đã mở {opened} mục (giới hạn {ExpandAllLimit} để không tải quá nhiều). Mở tiếp từng nhánh hoặc dùng tìm kiếm." : null;
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không mở được toàn bộ cây"); }
+        finally { _busy = false; }
+    }
+
+    private void CollapseAll()
+    {
+        void Walk(IEnumerable<TreeNode>? nodes)
+        {
+            foreach (var n in nodes ?? Enumerable.Empty<TreeNode>()) { n.Expanded = false; n.Match = false; Walk(n.Children); }
+        }
+        Walk(_roots);
+        _note = null;
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    /// <summary>Mở sẵn các nhánh chứa kết quả và tô sáng nút khớp.</summary>
+    private async Task SearchAsync()
+    {
+        if (Search == null || _roots == null) return;
+        CollapseAll();
+        var q = _q.Trim();
+        if (q.Length == 0) return;
+        _busy = true;
+        try
+        {
+            var paths = (await Search(q)).Take(30).ToList();
+            int found = 0;
+            foreach (var path in paths)
+            {
+                var node = await OpenPathAsync(path);
+                if (node != null) { node.Match = true; found++; }
+            }
+            _note = found == 0 ? $"Không tìm thấy \"{q}\"." : $"Tìm thấy {found} mục{(paths.Count >= 30 ? " (hiển thị 30 kết quả đầu)" : "")}; các nhánh chứa kết quả đã được mở.";
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tìm được"); }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Mở các nút cha theo chuỗi khóa; trả về nút cuối (null nếu không tìm thấy).</summary>
+    private async Task<TreeNode?> OpenPathAsync(IReadOnlyList<string> path)
+    {
+        List<TreeNode>? level = _roots;
+        TreeNode? node = null;
+        for (int i = 0; i < path.Count; i++)
+        {
+            node = level?.FirstOrDefault(n => n.Key == path[i]);
+            if (node == null) return null;
+            if (i < path.Count - 1)
+            {
+                await EnsureChildrenAsync(node);
+                node.Expanded = true;
+                level = node.Children;
+            }
+        }
+        return node;
+    }
+
+    /// <summary>Mở sẵn nhánh tới nút có chuỗi khóa <paramref name="path"/> (dùng khi mở trang với nút được chọn sẵn).</summary>
+    public async Task RevealAsync(IReadOnlyList<string> path)
+    {
+        if (_roots == null || path.Count == 0) return;
+        try { await OpenPathAsync(path); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không mở được nhánh"); }
+        StateHasChanged();
+    }
+
+    private async Task SelectAsync(TreeNode n)
+    {
+        if (n.HasChildren && !n.Expanded) await ToggleAsync(n);
+        await OnSelect.InvokeAsync(n);
+    }
+
+    // Cấp của nút tính khi vẽ (kể cả nút con được nạp sẵn cùng cha)
+    private RenderFragment RenderNode(TreeNode n, int level) { n.Level = level; return RenderRow(n); }
+
+    private RenderFragment RenderRow(TreeNode n) => @<div role="treeitem" aria-expanded="@(n.HasChildren ? n.Expanded.ToString().ToLowerInvariant() : null)">
+        <div class="tree-row @(n.Match ? "match" : "") @(n.Key == SelectedKey ? "sel" : "")" style="padding-left:@Ui.Px(4 + n.Level * 20)">
+            @if (n.HasChildren)
+            {
+                <button class="tree-tg" @onclick="() => ToggleAsync(n)" title="@(n.Expanded ? "Thu gọn" : "Mở")" aria-label="@(n.Expanded ? "Thu gọn" : "Mở") @n.Label">
+                    <Icon Name="@(n.Expanded ? "chevron-down" : "chevron-right")" Class="sm" />
+                </button>
+            }
+            else { <span class="tree-tg"></span> }
+            @if (n.Icon != null) { <Icon Name="@n.Icon" Class="sm" /> }
+            <span class="tree-label">
+                @if (n.Href != null) { <a href="@n.Href" title="@n.Label">@n.Label</a> }
+                else if (OnSelect.HasDelegate) { <button class="tree-pick" title="@n.Label" @onclick="() => SelectAsync(n)">@n.Label</button> }
+                else { <span title="@n.Label">@n.Label</span> }
+            </span>
+            @if (n.Badge != null) { <span class="badge b-@(n.BadgeColor ?? "gray")">@n.Badge</span> }
+            @if (n.ChildCount > 0) { <span class="tertiary small nowrap">@n.ChildCount</span> }
+            @if (n.Meta != null) { <span class="small nowrap hide-mobile c-@(n.MetaColor ?? "gray")">@n.Meta</span> }
+            @if (Actions != null) { <span class="tree-act">@Actions(n)</span> }
+        </div>
+        @if (n.Expanded)
+        {
+            if (n.Loading) { <div class="small muted" style="padding-left:@Ui.Px(30 + n.Level * 20)">Đang tải...</div> }
+            else if (n.Children != null) { foreach (var c in n.Children) { @RenderNode(c, n.Level + 1) } }
+        }
+    </div>;
+}

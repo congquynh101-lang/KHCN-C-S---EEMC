@@ -251,21 +251,81 @@ public enum AttachmentKind
     Report = 9        // Báo cáo
 }
 
-/// <summary>Hồ sơ, tài liệu gắn với công việc hoặc dự án: tệp tải lên máy chủ hoặc đường dẫn/liên kết.</summary>
+/// <summary>
+/// Hồ sơ, tài liệu: tệp tải lên máy chủ hoặc đường dẫn/liên kết. Một tài liệu có thể nằm ở nhiều nơi
+/// (thư mục, công việc, dự án, quyết định) qua <see cref="AttachmentLink"/> mà không nhân bản tệp.
+/// </summary>
 public class Attachment
 {
     public int Id { get; set; }
-    public int? TaskId { get; set; }
-    public int? ProjectId { get; set; }
     public string Name { get; set; } = "";
     public AttachmentKind Kind { get; set; }
     /// <summary>Đường dẫn mạng nội bộ, thư mục hoặc URL (khi không tải tệp lên).</summary>
     public string? Link { get; set; }
-    /// <summary>Tên tệp lưu trên máy chủ (khi tải tệp lên).</summary>
+    /// <summary>Tệp của phiên bản hiện hành lưu trên máy chủ (khi tải tệp lên).</summary>
     public string? StoredFile { get; set; }
     public long SizeBytes { get; set; }
+    /// <summary>Mã SHA-256 của phiên bản hiện hành, dùng phát hiện tệp trùng.</summary>
+    public string? Sha256 { get; set; }
+    public int CurrentVersion { get; set; } = 1;
     public string? DocumentNumber { get; set; }
     public DocumentStatus DocumentStatus { get; set; }
+    /// <summary>Nội dung chữ trích từ PDF/DOCX/TXT (null = chưa đọc, rỗng = không có chữ).</summary>
+    public string? ExtractedText { get; set; }
+    /// <summary>Chuỗi chuẩn hóa (không dấu) gồm tên, số văn bản và nội dung, phục vụ tìm kiếm.</summary>
+    public string SearchText { get; set; } = "";
+    public string? UploadedBy { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Vị trí của một tài liệu: đúng một trong FolderId / TaskId / ProjectId / LegalDocumentId.
+/// Nhiều vị trí cùng trỏ tới một tài liệu (không nhân bản tệp).
+/// </summary>
+public class AttachmentLink
+{
+    public int Id { get; set; }
+    public int AttachmentId { get; set; }
+    public int? FolderId { get; set; }
+    public int? TaskId { get; set; }
+    public int? ProjectId { get; set; }
+    public int? LegalDocumentId { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Một phiên bản tệp; bản cũ được giữ lại để xem, tải và khôi phục.</summary>
+public class AttachmentVersion
+{
+    public int Id { get; set; }
+    public int AttachmentId { get; set; }
+    public int VersionNo { get; set; }
+    public string StoredFile { get; set; } = "";
+    public string FileName { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public string? Sha256 { get; set; }
+    public string? Note { get; set; }
+    public string? UploadedBy { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
+/// <summary>
+/// Thư mục hồ sơ. Thư mục gốc thuộc về một dự án, công việc, quyết định (văn bản loại Quyết định) hoặc là thư mục chung;
+/// thư mục con mang cùng chủ sở hữu với thư mục gốc.
+/// </summary>
+public class DocFolder
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public int? ParentId { get; set; }
+    public int? ProjectId { get; set; }
+    public int? TaskId { get; set; }
+    public int? LegalDocumentId { get; set; }
+    public string? CreatedBy { get; set; }
+    public bool IsDeleted { get; set; }
+    public DateTime? DeletedAt { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -277,6 +337,14 @@ public class TaskDependency
     public int DependsOnTaskId { get; set; }
 }
 
+/// <summary>Vai trò người dùng bản web; giá trị lớn hơn bao gồm quyền của giá trị nhỏ hơn.</summary>
+public enum UserRole
+{
+    Viewer = 1,   // Chỉ xem
+    Editor = 2,   // Biên tập: thêm, sửa nội dung
+    Admin = 3     // Quản trị: người dùng, cài đặt, duyệt, xóa vĩnh viễn
+}
+
 /// <summary>Tài khoản đăng nhập bản web.</summary>
 public class AppUser
 {
@@ -284,7 +352,10 @@ public class AppUser
     public string UserName { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string PasswordHash { get; set; } = "";
-    public bool IsAdmin { get; set; }
+    public UserRole Role { get; set; } = UserRole.Viewer;
+    /// <summary>Tài khoản bị khóa bởi quản trị (không đăng nhập được).</summary>
+    public bool IsDisabled { get; set; }
+    public bool IsAdmin => Role == UserRole.Admin;
     public int FailedLogins { get; set; }
     public DateTime? LockedUntil { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -313,6 +384,7 @@ public enum LegalDocType
     Circular = 5,        // Thông tư
     Internal = 6,        // Quy chế, quy định nội bộ
     Standard = 7,        // Tiêu chuẩn, quy chuẩn
+    Guidance = 8,        // Văn bản hướng dẫn (công văn hướng dẫn, hướng dẫn nghiệp vụ...)
     Other = 9
 }
 
@@ -451,6 +523,35 @@ public class LegalTaskLink
     public int Id { get; set; }
     public int DocumentId { get; set; }
     public int TaskId { get; set; }
+}
+
+// ============================ TRỢ LÝ AI ============================
+
+/// <summary>Một cuộc hội thoại với trợ lý AI, chỉ người tạo xem được.</summary>
+public class ChatConversation
+{
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public string Title { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class ChatMessage
+{
+    public int Id { get; set; }
+    public int ConversationId { get; set; }
+    /// <summary>"user" hoặc "assistant".</summary>
+    public string Role { get; set; } = "";
+    public string Content { get; set; } = "";
+    /// <summary>Danh sách nguồn trích dẫn (JSON) của câu trả lời.</summary>
+    public string? SourcesJson { get; set; }
+    public string? Model { get; set; }
+    public long InputTokens { get; set; }
+    public long OutputTokens { get; set; }
+    /// <summary>Thông báo lỗi khi không lấy được câu trả lời.</summary>
+    public string? Error { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 /// <summary>Tệp thay đổi cuối cùng đã nhận từ từng máy khác.</summary>

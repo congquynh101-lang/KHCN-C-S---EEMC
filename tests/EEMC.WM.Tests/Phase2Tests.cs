@@ -191,15 +191,15 @@ public sealed class Phase2Tests : IAsyncLifetime
         var svc = new AttachmentService(_factory, _paths, _clock);
         var task = await _tasks.CreateAsync(New("Có hồ sơ"));
         await using var ms = new MemoryStream(Encoding.UTF8.GetBytes("noi dung"));
-        var a = await svc.UploadAsync(ms, "Tờ trình phê duyệt.docx", ms.Length, task.Id, null);
+        var a = (await svc.UploadAsync(ms, "Tờ trình phê duyệt.docx", ms.Length, DocTarget.Task(task.Id))).Attachment;
         Assert.Equal(AttachmentKind.Proposal, a.Kind);
         Assert.True(File.Exists(svc.ResolveStoredPath(a.StoredFile!)));
         Assert.Single(await svc.SearchAsync("to trinh", null, null));
 
-        await Assert.ThrowsAsync<ValidationException>(() => svc.UploadAsync(new MemoryStream(new byte[1]), "virus.exe", 1, task.Id, null));
+        await Assert.ThrowsAsync<ValidationException>(() => svc.UploadAsync(new MemoryStream(new byte[1]), "virus.exe", 1, DocTarget.Task(task.Id)));
         Assert.Null(svc.ResolveStoredPath("..\\..\\workmanager.db"));
 
-        await svc.DeleteAsync(a.Id);
+        await new DocumentService(_factory, svc, _clock).TrashFileAsync(a.Id);
         Assert.Empty(await svc.GetForTaskAsync(task.Id));
     }
 

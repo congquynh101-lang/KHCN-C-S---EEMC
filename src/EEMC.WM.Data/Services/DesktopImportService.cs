@@ -1,3 +1,4 @@
+using EEMC.WM.Core.Domain;
 using EEMC.WM.Data.Infrastructure;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +31,7 @@ public sealed class DesktopImportService
 
     public async Task<DesktopImportResult> ImportAsync(string uploadedDbPath)
     {
+        Access.Require(UserRole.Admin);
         if (!BackupService.IsValidBackup(uploadedDbPath, out var err)) throw new InvalidOperationException(err);
 
         // Làm việc trên bản sao để không thay đổi tệp người dùng tải lên

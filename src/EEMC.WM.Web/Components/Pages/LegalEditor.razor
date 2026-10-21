@@ -15,7 +15,11 @@
     </div>
 </div>
 
-@if (_notFound)
+@if (!_canEdit)
+{
+    <div class="card">Bạn cần vai trò Biên tập hoặc Quản trị để thêm, sửa văn bản. <a href="/legal">Về thư viện</a></div>
+}
+else if (_notFound)
 {
     <div class="card">Không tìm thấy văn bản. <a href="/legal">Về thư viện</a></div>
 }
@@ -141,8 +145,13 @@ else
     private string? _error, _warning, _uploadedNotSaved, _originalFile;
     private bool _busy, _notFound, _saved;
 
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private bool _canEdit;
+
     protected override async Task OnInitializedAsync()
     {
+        _canEdit = AuthState != null && AccessWiring.RoleOf((await AuthState).User) >= UserRole.Editor;
+        if (!_canEdit) return;
         _library = await Legal.SearchAsync();
         if (Id != 0)
         {

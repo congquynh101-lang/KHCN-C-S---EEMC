@@ -1,11 +1,16 @@
+using System.Collections.Concurrent;
 using EEMC.WM.Core.Domain;
 using EEMC.WM.Core.Time;
+using EEMC.WM.Data.Infrastructure;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 
 namespace EEMC.WM.Data.Services;
 
-public enum LoginResult { Success, InvalidCredentials, LockedOut, NoUsers }
+public enum LoginResult { Success, InvalidCredentials, LockedOut, NoUsers, Disabled }
+
+/// <summary>Thông tin tối thiểu để kiểm tra phiên đăng nhập và quyền (được lưu đệm).</summary>
+public sealed record UserAuthInfo(int Id, string DisplayName, UserRole Role, bool IsDisabled);
 
 /// <summary>Tài khoản đăng nhập bản web. Mật khẩu được băm (PBKDF2, chuẩn ASP.NET Core Identity).</summary>
 public sealed class UserService
@@ -46,10 +51,10 @@ public sealed class UserService
     {
         await using var db = await _factory.CreateDbContextAsync();
         if (await db.Users.AnyAsync()) throw new InvalidOperationException("Đã có tài khoản. Hãy đăng nhập.");
-        return await CreateAsync(db, userName, displayName, password, isAdmin: true);
+        return await CreateAsync(db, userName, displayName, password, UserRole.Admin);
     }
 
-    private async Task<AppUser> CreateAsync(AppDbContext db, string userName, string displayName, string password, bool isAdmin)
+    private async Task<AppUser> CreateAsync(AppDbContext db, string userName, string displayName, string password, UserRole role)
     {
         var errors = new List<string>();
         userName = (userName ?? "").Trim().ToLowerInvariant();
@@ -63,7 +68,7 @@ public sealed class UserService
         {
             UserName = userName,
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? userName : displayName.Trim(),
-            IsAdmin = isAdmin,
+            Role = role,
             CreatedAt = _clock.Now
         };
         u.PasswordHash = _hasher.HashPassword(u, password);
@@ -86,6 +91,11 @@ public sealed class UserService
             return (LoginResult.InvalidCredentials, null);
         }
         if (u.LockedUntil.HasValue && u.LockedUntil > now) return (LoginResult.LockedOut, null);
+        if (u.IsDisabled)
+        {
+            _hasher.HashPassword(new AppUser(), password ?? "");
+            return (LoginResult.Disabled, null);
+        }
 
         var r = _hasher.VerifyHashedPassword(u, u.PasswordHash, password ?? "");
         if (r == PasswordVerificationResult.Failed)
@@ -109,6 +119,7 @@ public sealed class UserService
 
     public async Task ChangePasswordAsync(int userId, string currentPassword, string newPassword)
     {
+        Access.RequireSelfOrAdmin(userId);
         await using var db = await _factory.CreateDbContextAsync();
         var u = await db.Users.FirstOrDefaultAsync(x => x.Id == userId) ?? throw new InvalidOperationException("Không tìm thấy tài khoản.");
         if (_hasher.VerifyHashedPassword(u, u.PasswordHash, currentPassword ?? "") == PasswordVerificationResult.Failed)
@@ -137,5 +148,73 @@ public sealed class UserService
     {
         await using var db = await _factory.CreateDbContextAsync();
         return await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == id);
+    }
+
+    // ---------------------------------------------------------------- Phân quyền
+
+    private readonly ConcurrentDictionary<int, UserAuthInfo?> _authCache = new();
+
+    /// <summary>Vai trò và trạng thái khóa hiện tại của tài khoản (đệm trong bộ nhớ, làm mới khi quản trị thay đổi).</summary>
+    public async Task<UserAuthInfo?> GetAuthInfoAsync(int id)
+    {
+        if (_authCache.TryGetValue(id, out var cached)) return cached;
+        await using var db = await _factory.CreateDbContextAsync();
+        var info = await db.Users.AsNoTracking().Where(u => u.Id == id)
+            .Select(u => new UserAuthInfo(u.Id, u.DisplayName, u.Role, u.IsDisabled)).FirstOrDefaultAsync();
+        _authCache[id] = info;
+        return info;
+    }
+
+    /// <summary>Người thực hiện tương ứng tài khoản (null nếu không tồn tại hoặc bị khóa).</summary>
+    public async Task<Actor?> GetActorAsync(int id)
+    {
+        var info = await GetAuthInfoAsync(id);
+        return info == null || info.IsDisabled ? null : new Actor(info.Id, info.DisplayName, info.Role);
+    }
+
+    // ---------------------------------------------------------------- Quản lý người dùng (quản trị)
+
+    public async Task<List<AppUser>> GetAllAsync()
+    {
+        Access.Require(UserRole.Admin);
+        await using var db = await _factory.CreateDbContextAsync();
+        return await db.Users.AsNoTracking().OrderByDescending(u => u.Role).ThenBy(u => u.UserName).ToListAsync();
+    }
+
+    public async Task<AppUser> CreateUserAsync(string userName, string displayName, string password, UserRole role)
+    {
+        Access.Require(UserRole.Admin);
+        await using var db = await _factory.CreateDbContextAsync();
+        return await CreateAsync(db, userName, displayName, password, role);
+    }
+
+    /// <summary>Đổi tên hiển thị, vai trò, khóa/mở khóa. Luôn giữ ít nhất một quản trị đang hoạt động.</summary>
+    public async Task UpdateUserAsync(int id, string displayName, UserRole role, bool disabled)
+    {
+        Access.Require(UserRole.Admin);
+        await using var db = await _factory.CreateDbContextAsync();
+        var u = await db.Users.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy tài khoản.");
+        bool losesAdmin = u.Role == UserRole.Admin && !u.IsDisabled && (role != UserRole.Admin || disabled);
+        if (losesAdmin && !await db.Users.AnyAsync(x => x.Id != id && x.Role == UserRole.Admin && !x.IsDisabled))
+            throw new ValidationException(new[] { "Phải còn ít nhất một tài khoản quản trị đang hoạt động." });
+        u.DisplayName = string.IsNullOrWhiteSpace(displayName) ? u.UserName : displayName.Trim();
+        u.Role = role;
+        u.IsDisabled = disabled;
+        await db.SaveChangesAsync();
+        _authCache.TryRemove(id, out _);
+    }
+
+    /// <summary>Quản trị đặt mật khẩu mới cho tài khoản khác (mở khóa đăng nhập sai).</summary>
+    public async Task AdminSetPasswordAsync(int id, string newPassword)
+    {
+        Access.Require(UserRole.Admin);
+        var errors = ValidatePassword(newPassword);
+        if (errors.Count > 0) throw new ValidationException(errors);
+        await using var db = await _factory.CreateDbContextAsync();
+        var u = await db.Users.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy tài khoản.");
+        u.PasswordHash = _hasher.HashPassword(u, newPassword);
+        u.FailedLogins = 0;
+        u.LockedUntil = null;
+        await db.SaveChangesAsync();
     }
 }

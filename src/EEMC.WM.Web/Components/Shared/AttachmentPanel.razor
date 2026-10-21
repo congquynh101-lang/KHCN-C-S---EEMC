@@ -1,68 +1,80 @@
 @inject AttachmentService Attachments
+@inject DocumentService Docs
 @inject UiService UiSvc
+@implements IDisposable
 
 <div class="card">
     <div class="card-head">
         <h2>Hồ sơ, tài liệu</h2>
         <span class="spacer"></span>
-        <label class="btn primary sm" style="cursor:pointer">
-            <Icon Name="upload" Class="sm" />Tải tệp lên
-            <InputFile OnChange="UploadAsync" multiple style="display:none" />
-        </label>
+        @if (ShowFolderLink) { <a class="btn sm ghost" href="/documents?c=@DocTree.KeyOf(Owner)" title="Mở cây thư mục hồ sơ"><Icon Name="folder" Class="sm" />Thư mục hồ sơ</a> }
+        @if (CanEdit)
+        {
+            <label class="btn primary sm" style="cursor:pointer">
+                <Icon Name="upload" Class="sm" />Tải tệp lên
+                <InputFile OnChange="UploadAsync" multiple style="display:none" />
+            </label>
+        }
     </div>
-    <div class="muted mb">Word, Excel, PDF, PowerPoint, ảnh, ZIP... tối đa @(AttachmentService.MaxBytes / 1024 / 1024) MB mỗi tệp. Tệp gốc trên máy bạn không bị thay đổi.</div>
+    <div class="muted mb">Word, Excel, PDF, PowerPoint, ảnh, ZIP... tối đa @(AttachmentService.MaxBytes / 1024 / 1024) MB mỗi tệp. Tệp trùng nội dung với tài liệu đã có chỉ được gắn thêm, không lưu bản sao. Tệp gốc trên máy bạn không bị thay đổi.</div>
     @if (_busy) { <div class="muted">Đang tải lên...</div> }
 
-    <div class="row mb">
-        <input class="input" style="max-width:240px" placeholder="Tên hiển thị (tùy chọn)" @bind="_linkName" />
-        <input class="input" style="max-width:360px;flex:1" placeholder="Đường dẫn mạng nội bộ (\\server\...) hoặc liên kết https://..." @bind="_link" />
-        <select class="input" style="width:auto" @bind="_linkKind">
-            @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
-        </select>
-        <button class="btn sm" @onclick="AddLinkAsync"><Icon Name="link" Class="sm" />Thêm đường dẫn</button>
-    </div>
+    @if (CanEdit)
+    {
+        <div class="row mb">
+            <input class="input" style="max-width:240px" placeholder="Tên hiển thị (tùy chọn)" @bind="_linkName" />
+            <input class="input" style="max-width:360px;flex:1" placeholder="Đường dẫn mạng nội bộ (\\server\...) hoặc liên kết https://..." @bind="_link" />
+            <select class="input" style="width:auto" @bind="_linkKind">
+                @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
+            </select>
+            <button class="btn sm" @onclick="AddLinkAsync"><Icon Name="link" Class="sm" />Thêm đường dẫn</button>
+        </div>
+    }
 
     @if (_items.Count == 0) { <div class="empty">Chưa có hồ sơ, tài liệu.</div> }
     else
     {
         <div class="table-wrap">
             <table class="data">
-                <thead><tr><th>Tài liệu</th><th>Loại</th><th>Số văn bản</th><th>Tình trạng</th><th>Ngày thêm</th><th></th></tr></thead>
+                <thead><tr><th>Tài liệu</th><th>Loại</th><th>Số văn bản</th><th>Tình trạng</th><th>Ở đâu</th><th></th></tr></thead>
                 <tbody>
-                    @foreach (var a in _items)
+                    @foreach (var r in _items)
                     {
+                        var row = r;
+                        var a = r.Attachment;
+                        var direct = r.Places.FirstOrDefault(p => p.Target.FolderId == null && DocTree.KeyOf(p.Target) == DocTree.KeyOf(Owner));
                         <tr>
                             <td class="title">
-                                @if (a.StoredFile != null)
-                                {
-                                    <a href="/files/@a.Id?inline=true" target="_blank"><Icon Name="file" Class="sm" /> @a.Name</a>
-                                    <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)</span>
-                                }
-                                else if (a.Link!.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    <a href="@a.Link" target="_blank" rel="noopener"><Icon Name="link" Class="sm" /> @a.Name</a>
-                                }
-                                else
-                                {
-                                    <span title="Đường dẫn nội bộ: sao chép và mở trong File Explorer"><Icon Name="folder" Class="sm" /> @a.Name</span>
-                                    <div class="tertiary small">@a.Link</div>
-                                }
+                                <button class="tree-pick" @onclick="() => _fileId = a.Id"><Icon Name="@(a.StoredFile != null ? "file" : "link")" Class="sm" /> @a.Name</button>
+                                <span class="tertiary small">@AttachmentService.SizeText(a.SizeBytes)@(a.CurrentVersion > 1 ? $" · v{a.CurrentVersion}" : "")</span>
                             </td>
-                            <td>
-                                <select class="input" style="width:auto" value="@a.Kind" @onchange="e => UpdateKind(a, e.Value?.ToString())">
-                                    @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
-                                </select>
+                            @if (CanEdit)
+                            {
+                                <td>
+                                    <select class="input" style="width:auto" value="@a.Kind" @onchange="e => UpdateKind(a, e.Value?.ToString())">
+                                        @foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }
+                                    </select>
+                                </td>
+                                <td><input class="input" style="width:140px" value="@a.DocumentNumber" @onchange="e => UpdateNumber(a, e.Value?.ToString())" /></td>
+                                <td>
+                                    <select class="input" style="width:auto" value="@a.DocumentStatus" @onchange="e => UpdateStatus(a, e.Value?.ToString())">
+                                        @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
+                                    </select>
+                                </td>
+                            }
+                            else
+                            {
+                                <td class="small">@Labels.Of(a.Kind)</td><td class="small">@a.DocumentNumber</td><td class="small">@Labels.Of(a.DocumentStatus)</td>
+                            }
+                            <td class="small">
+                                @if (direct != null) { <span>Gắn trực tiếp</span> }
+                                @foreach (var p in r.Places.Where(p => p.Target.FolderId != null)) { <div><a href="@p.Href">@p.Label</a></div> }
+                                @{ var elsewhere = r.Places.Count(p => p.Target.FolderId == null && p != direct); }
+                                @if (elsewhere > 0) { <div class="tertiary">+ @elsewhere nơi khác</div> }
                             </td>
-                            <td><input class="input" style="width:140px" value="@a.DocumentNumber" @onchange="e => UpdateNumber(a, e.Value?.ToString())" /></td>
-                            <td>
-                                <select class="input" style="width:auto" value="@a.DocumentStatus" @onchange="e => UpdateStatus(a, e.Value?.ToString())">
-                                    @foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }
-                                </select>
-                            </td>
-                            <td class="nowrap small">@Ui.Dt(a.CreatedAt)</td>
                             <td class="nowrap">
                                 @if (a.StoredFile != null) { <a class="btn sm ghost icon-only" href="/files/@a.Id" title="Tải về"><Icon Name="download" Class="sm" /></a> }
-                                <button class="btn sm ghost icon-only danger" @onclick="() => DeleteAsync(a)" title="Gỡ tài liệu"><Icon Name="trash" Class="sm" /></button>
+                                @if (CanEdit && direct != null) { <button class="btn sm ghost icon-only danger" @onclick="() => RemoveAsync(row, direct)" title="Gỡ khỏi đây"><Icon Name="trash" Class="sm" /></button> }
                             </td>
                         </tr>
                     }
@@ -72,31 +84,54 @@
     }
 </div>
 
+@if (_fileId is int fid)
+{
+    <DocFileDialog AttachmentId="fid" OnClose="() => _fileId = null" OnChanged="LoadAsync" />
+}
+
 @code {
     [Parameter] public int? TaskId { get; set; }
     [Parameter] public int? ProjectId { get; set; }
-    private List<Attachment> _items = new();
+    /// <summary>Hồ sơ gắn với văn bản pháp luật (quyết định, văn bản hướng dẫn...).</summary>
+    [Parameter] public int? LegalDocumentId { get; set; }
+    /// <summary>Hiện nút mở cây thư mục (chỉ dự án, công việc, quyết định có thư mục trên cây hồ sơ).</summary>
+    [Parameter] public bool ShowFolderLink { get; set; } = true;
+    [CascadingParameter(Name = "UserRole")] public UserRole Role { get; set; } = UserRole.Viewer;
+
+    private bool CanEdit => Role >= UserRole.Editor;
+    private DocOwner Owner => TaskId is int t ? new DocOwner(TaskId: t)
+        : LegalDocumentId is int l ? new DocOwner(LegalDocumentId: l) : new DocOwner(ProjectId: ProjectId);
+    private DocTarget Target => Owner.AsTarget!.Value;
+    private List<AttachmentRow> _items = new();
     private bool _busy;
+    private int? _fileId;
     private string _link = "", _linkName = "";
     private AttachmentKind _linkKind = AttachmentKind.Folder;
 
+    protected override void OnInitialized() => Attachments.Changed += OnChanged;
+
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
+    private void OnChanged(object? s, EventArgs e) => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+
     private async Task LoadAsync() =>
-        _items = TaskId.HasValue ? await Attachments.GetForTaskAsync(TaskId.Value) : ProjectId.HasValue ? await Attachments.GetForProjectAsync(ProjectId.Value) : new();
+        _items = TaskId.HasValue || ProjectId.HasValue || LegalDocumentId.HasValue ? await Attachments.GetRowsForAsync(Owner) : new();
 
     private async Task UploadAsync(InputFileChangeEventArgs e)
     {
         _busy = true;
+        int added = 0;
         try
         {
             foreach (var f in e.GetMultipleFiles(20))
             {
                 if (f.Size > AttachmentService.MaxBytes) { UiSvc.Error($"{f.Name}: vượt quá {AttachmentService.MaxBytes / 1024 / 1024} MB."); continue; }
                 await using var s = f.OpenReadStream(AttachmentService.MaxBytes);
-                await Attachments.UploadAsync(s, f.Name, f.Size, TaskId, ProjectId);
+                var r = await Attachments.UploadAsync(s, f.Name, f.Size, Target);
+                if (r.Duplicate) UiSvc.Show($"{f.Name}: trùng nội dung với \"{r.Attachment.Name}\" đã có — chỉ gắn thêm vào đây, không lưu bản sao.");
+                else added++;
             }
-            UiSvc.Success("Đã tải tệp lên.");
+            if (added > 0) UiSvc.Success($"Đã tải lên {added} tệp.");
         }
         catch (Exception ex) { UiSvc.Error(ex, "Không tải được tệp lên"); }
         finally { _busy = false; await LoadAsync(); }
@@ -106,7 +141,7 @@
     {
         try
         {
-            await Attachments.AddLinkAsync(_linkName, _link, _linkKind, TaskId, ProjectId);
+            await Attachments.AddLinkAsync(_linkName, _link, _linkKind, Target);
             _link = _linkName = "";
             await LoadAsync();
         }
@@ -115,24 +150,35 @@
 
     private async Task UpdateKind(Attachment a, string? v)
     {
-        if (Enum.TryParse<AttachmentKind>(v, out var k)) { a.Kind = k; await Attachments.UpdateMetaAsync(a.Id, a.Kind, a.DocumentStatus, a.DocumentNumber); }
+        if (Enum.TryParse<AttachmentKind>(v, out var k)) await Save(a, () => a.Kind = k);
     }
 
     private async Task UpdateStatus(Attachment a, string? v)
     {
-        if (Enum.TryParse<DocumentStatus>(v, out var s)) { a.DocumentStatus = s; await Attachments.UpdateMetaAsync(a.Id, a.Kind, a.DocumentStatus, a.DocumentNumber); }
+        if (Enum.TryParse<DocumentStatus>(v, out var s)) await Save(a, () => a.DocumentStatus = s);
     }
 
-    private async Task UpdateNumber(Attachment a, string? v)
+    private Task UpdateNumber(Attachment a, string? v) => Save(a, () => a.DocumentNumber = v);
+
+    private async Task Save(Attachment a, Action change)
     {
-        a.DocumentNumber = v;
-        await Attachments.UpdateMetaAsync(a.Id, a.Kind, a.DocumentStatus, a.DocumentNumber);
+        change();
+        try { await Attachments.UpdateMetaAsync(a.Id, a.Kind, a.DocumentStatus, a.DocumentNumber); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được"); }
     }
 
-    private async Task DeleteAsync(Attachment a)
+    private async Task RemoveAsync(AttachmentRow r, PlaceInfo here)
     {
-        if (!await UiSvc.ConfirmAsync($"Gỡ tài liệu \"{a.Name}\" khỏi công việc?{(a.StoredFile != null ? "\nTệp đã tải lên máy chủ sẽ bị xóa." : "")}", "Gỡ", danger: true)) return;
-        await Attachments.DeleteAsync(a.Id);
+        var last = r.Places.Count == 1;
+        if (!await UiSvc.ConfirmAsync($"Gỡ tài liệu \"{r.Attachment.Name}\" khỏi đây?" + (last ? "\nĐây là nơi cuối cùng: tài liệu vào thùng rác (khôi phục được trong Hồ sơ tài liệu → Thùng rác)." : "\nTài liệu vẫn còn ở nơi khác."), "Gỡ", danger: last)) return;
+        try
+        {
+            var trashed = await Docs.RemovePlacementAsync(here.LinkId);
+            UiSvc.Success(trashed ? "Đã gỡ; tài liệu vào thùng rác." : "Đã gỡ khỏi đây.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không gỡ được"); }
         await LoadAsync();
     }
+
+    public void Dispose() => Attachments.Changed -= OnChanged;
 }

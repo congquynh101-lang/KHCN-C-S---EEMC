@@ -1,3 +1,4 @@
+using EEMC.WM.Data.Infrastructure;
 using EEMC.WM.Core.Domain;
 using EEMC.WM.Core.Services;
 using EEMC.WM.Core.Time;
@@ -112,6 +113,7 @@ public sealed class ProjectService
 
     public async Task<Project> SaveAsync(Project input)
     {
+        Access.Require(UserRole.Editor);
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(input.Name)) errors.Add("Vui lòng nhập tên đề tài/dự án.");
         if (input.StartDate.HasValue && input.EndDate.HasValue && input.EndDate < input.StartDate)
@@ -153,6 +155,7 @@ public sealed class ProjectService
     /// <summary>Tạo dự án từ mẫu: tên, mô tả, cấp quản lý và các mốc (không có ngày).</summary>
     public async Task<Project> CreateFromTemplateAsync(ProjectTemplate tpl)
     {
+        Access.Require(UserRole.Editor);
         var p = await SaveAsync(new Project { Name = tpl.Name, ManagementLevel = tpl.ManagementLevel, Description = tpl.Description });
         await using var db = await _factory.CreateDbContextAsync();
         int i = 0;
@@ -173,9 +176,11 @@ public sealed class ProjectService
 
     public async Task DeleteAsync(int id)
     {
+        Access.Require(UserRole.Admin);
         await using var db = await _factory.CreateDbContextAsync();
         await db.Tasks.Where(t => t.ProjectId == id).ExecuteUpdateAsync(s => s.SetProperty(t => t.ProjectId, (int?)null));
-        await db.Attachments.Where(a => a.ProjectId == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.ProjectId, (int?)null));
+        var code = await db.Projects.Where(p => p.Id == id).Select(p => p.Code).FirstOrDefaultAsync() ?? "Dự án";
+        await DocumentService.DetachOwnerAsync(db, new DocOwner(ProjectId: id), code, _clock.Now);
         await db.Projects.Where(p => p.Id == id).ExecuteDeleteAsync();
         Changed?.Invoke(this, EventArgs.Empty);
     }
@@ -184,6 +189,7 @@ public sealed class ProjectService
 
     public async Task<Milestone> SaveMilestoneAsync(Milestone input)
     {
+        Access.Require(UserRole.Editor);
         if (string.IsNullOrWhiteSpace(input.Name)) throw new ValidationException(new[] { "Vui lòng nhập tên mốc." });
         await using var db = await _factory.CreateDbContextAsync();
         Milestone m;
@@ -206,6 +212,7 @@ public sealed class ProjectService
 
     public async Task DeleteMilestoneAsync(int id)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         await db.Milestones.Where(m => m.Id == id).ExecuteDeleteAsync();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -214,6 +221,7 @@ public sealed class ProjectService
     /// <summary>Gắn các công việc cũ có "Tên đề tài/dự án" trùng tên dự án vào dự án (dữ liệu từ Giai đoạn 1).</summary>
     public async Task<int> LinkByProjectNameAsync(int projectId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         var p = await db.Projects.AsNoTracking().FirstAsync(x => x.Id == projectId);
         var key = Core.Text.TextNormalizer.Normalize(p.Name);

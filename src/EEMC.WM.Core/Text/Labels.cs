@@ -88,6 +88,13 @@ public static class Labels
         _ => "Tài liệu khác"
     };
 
+    public static string Of(UserRole r) => r switch
+    {
+        UserRole.Admin => "Quản trị",
+        UserRole.Editor => "Biên tập",
+        _ => "Chỉ xem"
+    };
+
     public static string Of(LegalDocType t) => t switch
     {
         LegalDocType.Law => "Luật",
@@ -97,6 +104,7 @@ public static class Labels
         LegalDocType.Circular => "Thông tư",
         LegalDocType.Internal => "Quy chế nội bộ",
         LegalDocType.Standard => "Tiêu chuẩn/Quy chuẩn",
+        LegalDocType.Guidance => "Văn bản hướng dẫn",
         _ => "Văn bản khác"
     };
 

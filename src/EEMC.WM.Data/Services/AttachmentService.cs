@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using EEMC.WM.Core.Domain;
 using EEMC.WM.Core.Text;
 using EEMC.WM.Core.Time;
@@ -6,21 +7,40 @@ using Microsoft.EntityFrameworkCore;
 
 namespace EEMC.WM.Data.Services;
 
+/// <summary>Nơi đặt tài liệu: đúng một trong thư mục, công việc, dự án, văn bản (quyết định).</summary>
+public readonly record struct DocTarget(int? FolderId = null, int? TaskId = null, int? ProjectId = null, int? LegalDocumentId = null)
+{
+    public static DocTarget Folder(int id) => new(FolderId: id);
+    public static DocTarget Task(int id) => new(TaskId: id);
+    public static DocTarget Project(int id) => new(ProjectId: id);
+    public static DocTarget Legal(int id) => new(LegalDocumentId: id);
+
+    public int Count => (FolderId.HasValue ? 1 : 0) + (TaskId.HasValue ? 1 : 0) + (ProjectId.HasValue ? 1 : 0) + (LegalDocumentId.HasValue ? 1 : 0);
+}
+
+/// <summary>Một vị trí của tài liệu kèm tên hiển thị và đường dẫn trang tương ứng.</summary>
+public sealed record PlaceInfo(int LinkId, DocTarget Target, string Label, string Href);
+
 public sealed class AttachmentRow
 {
     public required Attachment Attachment { get; init; }
-    public string? TaskCode { get; init; }
-    public string? TaskTitle { get; init; }
-    public string? ProjectName { get; init; }
+    public List<PlaceInfo> Places { get; init; } = new();
 }
+
+/// <summary>Kết quả tải lên: tài liệu (mới hoặc đã có) và cho biết nội dung có trùng tài liệu sẵn có không.</summary>
+public sealed record UploadResult(Attachment Attachment, bool Duplicate);
 
 /// <summary>
 /// Hồ sơ, tài liệu: lưu tệp tải lên trong thư mục dữ liệu (files\yyyy\MM\...) hoặc chỉ lưu đường dẫn/liên kết.
-/// Tệp gốc không bao giờ bị sửa; người dùng tải về và mở bằng ứng dụng mặc định.
+/// Tệp gốc không bao giờ bị sửa; mỗi lần tải bản mới là một phiên bản, bản cũ được giữ. Tệp trùng nội dung
+/// (cùng SHA-256) không lưu lần hai mà gắn thêm vị trí cho tài liệu sẵn có.
 /// </summary>
 public sealed class AttachmentService
 {
     public const long MaxBytes = 50L * 1024 * 1024;
+    /// <summary>Chỉ đọc nội dung tệp nhỏ hơn mức này (NAS ít bộ nhớ).</summary>
+    public const long MaxExtractBytes = 20L * 1024 * 1024;
+    private const int MaxExtractChars = 300_000;
 
     public static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -38,6 +58,10 @@ public sealed class AttachmentService
         _paths = paths;
         _clock = clock;
     }
+
+    /// <summary>Có thay đổi hồ sơ (để các trang đang mở tải lại).</summary>
+    public event EventHandler? Changed;
+    internal void RaiseChanged() => Changed?.Invoke(this, EventArgs.Empty);
 
     public string FilesDir => Path.Combine(_paths.DataDir, "files");
 
@@ -58,16 +82,43 @@ public sealed class AttachmentService
         };
     }
 
-    public async Task<List<Attachment>> GetForTaskAsync(int taskId)
+    // ---------------------------------------------------------------- Đọc
+
+    /// <summary>Danh sách nhẹ (không kèm nội dung đã trích) để hiển thị bảng.</summary>
+    internal static IQueryable<Attachment> Light(IQueryable<Attachment> q) => q.Select(a => new Attachment
+    {
+        Id = a.Id, Name = a.Name, Kind = a.Kind, Link = a.Link, StoredFile = a.StoredFile, SizeBytes = a.SizeBytes, Sha256 = a.Sha256,
+        CurrentVersion = a.CurrentVersion, DocumentNumber = a.DocumentNumber, DocumentStatus = a.DocumentStatus, UploadedBy = a.UploadedBy,
+        IsDeleted = a.IsDeleted, DeletedAt = a.DeletedAt, CreatedAt = a.CreatedAt, UpdatedAt = a.UpdatedAt
+    });
+
+    /// <summary>Tài liệu của công việc: gắn trực tiếp hoặc nằm trong thư mục của công việc.</summary>
+    public Task<List<Attachment>> GetForTaskAsync(int taskId) => GetForOwnerAsync(l => l.TaskId == taskId, f => f.TaskId == taskId);
+
+    /// <summary>Tài liệu của dự án: gắn trực tiếp hoặc nằm trong thư mục của dự án.</summary>
+    public Task<List<Attachment>> GetForProjectAsync(int projectId) => GetForOwnerAsync(l => l.ProjectId == projectId, f => f.ProjectId == projectId);
+
+    public Task<List<Attachment>> GetForLegalAsync(int legalId) => GetForOwnerAsync(l => l.LegalDocumentId == legalId, f => f.LegalDocumentId == legalId);
+
+    private async Task<List<Attachment>> GetForOwnerAsync(System.Linq.Expressions.Expression<Func<AttachmentLink, bool>> direct,
+        System.Linq.Expressions.Expression<Func<DocFolder, bool>> ownedFolder)
     {
         await using var db = await _factory.CreateDbContextAsync();
-        return await db.Attachments.AsNoTracking().Where(a => a.TaskId == taskId).OrderByDescending(a => a.CreatedAt).ToListAsync();
+        var folderIds = db.DocFolders.Where(ownedFolder).Where(f => !f.IsDeleted).Select(f => f.Id);
+        var ids = db.AttachmentLinks.Where(direct).Select(l => l.AttachmentId)
+            .Union(db.AttachmentLinks.Where(l => l.FolderId != null && folderIds.Contains(l.FolderId.Value)).Select(l => l.AttachmentId));
+        return await Light(db.Attachments.AsNoTracking().Where(a => ids.Contains(a.Id) && !a.IsDeleted))
+            .OrderByDescending(a => a.UpdatedAt).ToListAsync();
     }
 
-    public async Task<List<Attachment>> GetForProjectAsync(int projectId)
+    /// <summary>Tài liệu của dự án/công việc/quyết định kèm danh sách vị trí (để biết tài liệu gắn trực tiếp hay nằm trong thư mục).</summary>
+    public async Task<List<AttachmentRow>> GetRowsForAsync(DocOwner owner)
     {
+        var list = owner.TaskId is int t ? await GetForTaskAsync(t)
+            : owner.ProjectId is int p ? await GetForProjectAsync(p)
+            : owner.LegalDocumentId is int l ? await GetForLegalAsync(l) : new();
         await using var db = await _factory.CreateDbContextAsync();
-        return await db.Attachments.AsNoTracking().Where(a => a.ProjectId == projectId).OrderByDescending(a => a.CreatedAt).ToListAsync();
+        return await BuildRowsAsync(db, list);
     }
 
     public async Task<Attachment?> GetAsync(int id)
@@ -76,38 +127,303 @@ public sealed class AttachmentService
         return await db.Attachments.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
     }
 
-    /// <summary>Tìm kiếm hồ sơ theo tên tài liệu, số văn bản, tên công việc, dự án.</summary>
+    public async Task<List<AttachmentVersion>> GetVersionsAsync(int id)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        return await db.AttachmentVersions.AsNoTracking().Where(v => v.AttachmentId == id).OrderByDescending(v => v.VersionNo).ToListAsync();
+    }
+
+    public async Task<AttachmentVersion?> GetVersionAsync(int id, int versionNo)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        return await db.AttachmentVersions.AsNoTracking().FirstOrDefaultAsync(v => v.AttachmentId == id && v.VersionNo == versionNo);
+    }
+
+    /// <summary>Các vị trí của tài liệu.</summary>
+    public async Task<List<PlaceInfo>> GetPlacesAsync(int id)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        return (await BuildRowsAsync(db, new List<Attachment> { new() { Id = id } })).Single().Places;
+    }
+
+    /// <summary>Tìm theo tên, số văn bản, nội dung tài liệu (không phân biệt dấu) và theo công việc/dự án/văn bản đang chứa tài liệu.</summary>
     public async Task<List<AttachmentRow>> SearchAsync(string? text, AttachmentKind? kind, DocumentStatus? status, int take = 300)
     {
         await using var db = await _factory.CreateDbContextAsync();
-        var q = db.Attachments.AsNoTracking().AsQueryable();
+        var q = db.Attachments.AsNoTracking().Where(a => !a.IsDeleted);
         if (kind.HasValue) q = q.Where(a => a.Kind == kind.Value);
         if (status.HasValue) q = q.Where(a => a.DocumentStatus == status.Value);
-        var rows = await q.OrderByDescending(a => a.CreatedAt).Take(5000).ToListAsync();
-        var taskIds = rows.Where(a => a.TaskId != null).Select(a => a.TaskId!.Value).Distinct().ToList();
-        var projIds = rows.Where(a => a.ProjectId != null).Select(a => a.ProjectId!.Value).Distinct().ToList();
-        var tasks = await db.Tasks.AsNoTracking().Where(t => taskIds.Contains(t.Id)).Select(t => new { t.Id, t.Code, t.Title, t.ProjectName }).ToDictionaryAsync(t => t.Id);
-        var projects = await db.Projects.AsNoTracking().Where(p => projIds.Contains(p.Id)).Select(p => new { p.Id, p.Name }).ToDictionaryAsync(p => p.Id);
-        var result = rows.Select(a =>
+        var terms = TextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (terms.Length > 0)
         {
-            var t = a.TaskId.HasValue && tasks.TryGetValue(a.TaskId.Value, out var tt) ? tt : null;
-            var p = a.ProjectId.HasValue && projects.TryGetValue(a.ProjectId.Value, out var pp) ? pp : null;
-            return new AttachmentRow { Attachment = a, TaskCode = t?.Code, TaskTitle = t?.Title, ProjectName = p?.Name ?? t?.ProjectName };
-        });
-        if (!string.IsNullOrWhiteSpace(text))
-        {
-            var terms = TextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            result = result.Where(r =>
-            {
-                var hay = TextNormalizer.Normalize(string.Join(" ", r.Attachment.Name, r.Attachment.DocumentNumber, r.Attachment.Link, r.TaskCode, r.TaskTitle, r.ProjectName));
-                return terms.All(hay.Contains);
-            });
+            // Khớp nội dung tài liệu, hoặc nằm ở công việc/dự án/văn bản có tên khớp
+            var byText = db.Attachments.AsQueryable();
+            foreach (var t in terms) byText = byText.Where(a => a.SearchText.Contains(t));
+            var tasks = db.Tasks.Where(x => !x.IsDeleted);
+            foreach (var t in terms) tasks = tasks.Where(x => x.SearchText.Contains(t));
+            var taskIds = tasks.Select(x => x.Id);
+            var projects = await db.Projects.Select(p => new { p.Id, p.Code, p.Name }).ToListAsync();
+            var projIds = projects.Where(p => terms.All(TextNormalizer.Normalize(p.Code + " " + p.Name).Contains)).Select(p => p.Id).ToList();
+            var legal = db.LegalDocuments.AsQueryable();
+            foreach (var t in terms) legal = legal.Where(x => x.SearchText.Contains(t));
+            var legalIds = legal.Select(x => x.Id);
+            var byOwner = db.AttachmentLinks.Where(l => (l.TaskId != null && taskIds.Contains(l.TaskId.Value))
+                    || (l.ProjectId != null && projIds.Contains(l.ProjectId.Value))
+                    || (l.LegalDocumentId != null && legalIds.Contains(l.LegalDocumentId.Value)))
+                .Select(l => l.AttachmentId);
+            var byTextIds = byText.Select(x => x.Id);
+            q = q.Where(a => byTextIds.Contains(a.Id) || byOwner.Contains(a.Id));
         }
-        return result.Take(take).ToList();
+        var rows = await Light(q).OrderByDescending(a => a.UpdatedAt).Take(take).ToListAsync();
+        return await BuildRowsAsync(db, rows);
     }
 
-    /// <summary>Lưu tệp tải lên. Kiểm tra dung lượng và phần mở rộng.</summary>
-    public async Task<Attachment> UploadAsync(Stream content, string fileName, long size, int? taskId, int? projectId, AttachmentKind? kind = null)
+    /// <summary>Ghép tên hiển thị các vị trí cho danh sách tài liệu (bỏ vị trí trong thư mục đã xóa).</summary>
+    internal static async Task<List<AttachmentRow>> BuildRowsAsync(AppDbContext db, List<Attachment> items)
+    {
+        var ids = items.Select(a => a.Id).ToList();
+        var links = await db.AttachmentLinks.AsNoTracking().Where(l => ids.Contains(l.AttachmentId)).ToListAsync();
+        var taskIds = links.Where(l => l.TaskId != null).Select(l => l.TaskId!.Value).Distinct().ToList();
+        var projIds = links.Where(l => l.ProjectId != null).Select(l => l.ProjectId!.Value).Distinct().ToList();
+        var legalIds = links.Where(l => l.LegalDocumentId != null).Select(l => l.LegalDocumentId!.Value).Distinct().ToList();
+        var folderIds = links.Where(l => l.FolderId != null).Select(l => l.FolderId!.Value).Distinct().ToList();
+        var tasks = await db.Tasks.AsNoTracking().Where(t => taskIds.Contains(t.Id)).Select(t => new { t.Id, t.Code, t.Title }).ToDictionaryAsync(t => t.Id);
+        var projects = await db.Projects.AsNoTracking().Where(p => projIds.Contains(p.Id)).Select(p => new { p.Id, p.Code, p.Name }).ToDictionaryAsync(p => p.Id);
+        var legal = await db.LegalDocuments.AsNoTracking().Where(d => legalIds.Contains(d.Id)).Select(d => new { d.Id, d.Number, d.Title }).ToDictionaryAsync(d => d.Id);
+        var folderPaths = await DocumentService.FolderPathsAsync(db, folderIds);
+        var result = new List<AttachmentRow>();
+        foreach (var a in items)
+        {
+            var places = new List<PlaceInfo>();
+            foreach (var l in links.Where(l => l.AttachmentId == a.Id))
+            {
+                var target = new DocTarget(l.FolderId, l.TaskId, l.ProjectId, l.LegalDocumentId);
+                if (l.FolderId is int fid && folderPaths.TryGetValue(fid, out var path))
+                    places.Add(new PlaceInfo(l.Id, target, "Thư mục: " + path, $"/documents?c=f:{fid}"));
+                else if (l.TaskId is int tid && tasks.TryGetValue(tid, out var t))
+                    places.Add(new PlaceInfo(l.Id, target, $"{t.Code} – {t.Title}", $"/tasks/{tid}"));
+                else if (l.ProjectId is int pid && projects.TryGetValue(pid, out var p))
+                    places.Add(new PlaceInfo(l.Id, target, $"{p.Code} – {p.Name}", $"/projects/{pid}"));
+                else if (l.LegalDocumentId is int lid && legal.TryGetValue(lid, out var d))
+                    places.Add(new PlaceInfo(l.Id, target, string.IsNullOrEmpty(d.Number) ? d.Title : $"{d.Number} – {d.Title}", $"/legal/{lid}"));
+            }
+            result.Add(new AttachmentRow { Attachment = a, Places = places });
+        }
+        return result;
+    }
+
+    // ---------------------------------------------------------------- Ghi
+
+    internal static void ValidateTarget(DocTarget target)
+    {
+        if (target.Count != 1) throw new ValidationException(new[] { "Tài liệu phải đặt vào đúng một thư mục, công việc, dự án hoặc văn bản." });
+    }
+
+    internal static async Task CheckTargetExistsAsync(AppDbContext db, DocTarget t)
+    {
+        bool ok = t.FolderId is int f ? await db.DocFolders.AnyAsync(x => x.Id == f && !x.IsDeleted)
+            : t.TaskId is int tk ? await db.Tasks.AnyAsync(x => x.Id == tk && !x.IsDeleted)
+            : t.ProjectId is int p ? await db.Projects.AnyAsync(x => x.Id == p)
+            : t.LegalDocumentId is int l && await db.LegalDocuments.AnyAsync(x => x.Id == l);
+        if (!ok) throw new InvalidOperationException("Không tìm thấy nơi đặt tài liệu (có thể đã bị xóa).");
+    }
+
+    internal static Task<bool> HasPlacementAsync(AppDbContext db, int attachmentId, DocTarget t) =>
+        db.AttachmentLinks.AnyAsync(l => l.AttachmentId == attachmentId && l.FolderId == t.FolderId && l.TaskId == t.TaskId
+                                         && l.ProjectId == t.ProjectId && l.LegalDocumentId == t.LegalDocumentId);
+
+    /// <summary>Lưu tệp tải lên vào nơi chỉ định. Tệp trùng nội dung với tài liệu sẵn có: không lưu lần hai, chỉ gắn thêm vị trí.</summary>
+    public async Task<UploadResult> UploadAsync(Stream content, string fileName, long size, DocTarget target, AttachmentKind? kind = null)
+    {
+        Access.Require(UserRole.Editor);
+        ValidateTarget(target);
+        var stored = await StoreAsync(content, fileName, size);
+        await using var db = await _factory.CreateDbContextAsync();
+        try { await CheckTargetExistsAsync(db, target); }
+        catch { DeleteStored(stored.Rel); throw; }
+        var now = _clock.Now;
+
+        var existing = await db.Attachments.FirstOrDefaultAsync(a => a.Sha256 == stored.Sha256 && a.SizeBytes == stored.Size && !a.IsDeleted);
+        if (existing != null)
+        {
+            DeleteStored(stored.Rel);
+            if (!await HasPlacementAsync(db, existing.Id, target))
+            {
+                AddPlacement(db, existing.Id, target, now);
+                AddHistory(db, target, now, $"Gắn tài liệu đã có: {existing.Name}");
+                await db.SaveChangesAsync();
+            }
+            RaiseChanged();
+            return new UploadResult(existing, true);
+        }
+
+        var a = new Attachment
+        {
+            Name = stored.Name, StoredFile = stored.Rel, SizeBytes = stored.Size, Sha256 = stored.Sha256, CurrentVersion = 1,
+            Kind = kind ?? GuessKind(stored.Name), UploadedBy = Access.Current?.Name, CreatedAt = now, UpdatedAt = now
+        };
+        ApplyText(a, stored.Text);
+        db.Attachments.Add(a);
+        await db.SaveChangesAsync();
+        db.AttachmentVersions.Add(new AttachmentVersion
+        {
+            AttachmentId = a.Id, VersionNo = 1, StoredFile = stored.Rel, FileName = stored.Name, SizeBytes = stored.Size,
+            Sha256 = stored.Sha256, UploadedBy = a.UploadedBy, UploadedAt = now
+        });
+        AddPlacement(db, a.Id, target, now);
+        AddHistory(db, target, now, $"Thêm tài liệu: {stored.Name}");
+        await db.SaveChangesAsync();
+        RaiseChanged();
+        return new UploadResult(a, false);
+    }
+
+    /// <summary>Tải lên phiên bản mới của tài liệu; phiên bản cũ vẫn được giữ.</summary>
+    public async Task<AttachmentVersion> UploadVersionAsync(int id, Stream content, string fileName, long size, string? note)
+    {
+        Access.Require(UserRole.Editor);
+        await using var db = await _factory.CreateDbContextAsync();
+        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted) ?? throw new InvalidOperationException("Không tìm thấy tài liệu.");
+        if (a.StoredFile == null) throw new ValidationException(new[] { "Tài liệu dạng đường dẫn/liên kết không có phiên bản tệp." });
+        var stored = await StoreAsync(content, fileName, size);
+        if (stored.Sha256 == a.Sha256)
+        {
+            DeleteStored(stored.Rel);
+            throw new ValidationException(new[] { "Tệp mới giống hệt phiên bản hiện hành." });
+        }
+        var now = _clock.Now;
+        var no = (await db.AttachmentVersions.Where(v => v.AttachmentId == id).Select(v => (int?)v.VersionNo).MaxAsync() ?? 0) + 1;
+        var v = new AttachmentVersion
+        {
+            AttachmentId = id, VersionNo = no, StoredFile = stored.Rel, FileName = stored.Name, SizeBytes = stored.Size, Sha256 = stored.Sha256,
+            Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(), UploadedBy = Access.Current?.Name, UploadedAt = now
+        };
+        db.AttachmentVersions.Add(v);
+        a.StoredFile = stored.Rel;
+        a.SizeBytes = stored.Size;
+        a.Sha256 = stored.Sha256;
+        a.CurrentVersion = no;
+        a.UpdatedAt = now;
+        ApplyText(a, stored.Text);
+        await db.SaveChangesAsync();
+        RaiseChanged();
+        return v;
+    }
+
+    /// <summary>Đưa một phiên bản cũ trở lại làm hiện hành (tạo phiên bản mới dùng lại tệp cũ, không sao chép tệp).</summary>
+    public async Task RestoreVersionAsync(int id, int versionNo)
+    {
+        Access.Require(UserRole.Editor);
+        await using var db = await _factory.CreateDbContextAsync();
+        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted) ?? throw new InvalidOperationException("Không tìm thấy tài liệu.");
+        var old = await db.AttachmentVersions.AsNoTracking().FirstOrDefaultAsync(v => v.AttachmentId == id && v.VersionNo == versionNo)
+                  ?? throw new InvalidOperationException("Không tìm thấy phiên bản.");
+        if (versionNo == a.CurrentVersion) return;
+        var now = _clock.Now;
+        var no = await db.AttachmentVersions.Where(v => v.AttachmentId == id).MaxAsync(v => v.VersionNo) + 1;
+        db.AttachmentVersions.Add(new AttachmentVersion
+        {
+            AttachmentId = id, VersionNo = no, StoredFile = old.StoredFile, FileName = old.FileName, SizeBytes = old.SizeBytes, Sha256 = old.Sha256,
+            Note = $"Khôi phục từ phiên bản {versionNo}", UploadedBy = Access.Current?.Name, UploadedAt = now
+        });
+        a.StoredFile = old.StoredFile;
+        a.SizeBytes = old.SizeBytes;
+        a.Sha256 = old.Sha256;
+        a.CurrentVersion = no;
+        a.UpdatedAt = now;
+        await db.SaveChangesAsync();
+        await IndexAsync(db, a);
+        RaiseChanged();
+    }
+
+    /// <summary>Thêm đường dẫn mạng nội bộ, thư mục hồ sơ hoặc liên kết web.</summary>
+    public async Task<Attachment> AddLinkAsync(string name, string link, AttachmentKind kind, DocTarget target)
+    {
+        Access.Require(UserRole.Editor);
+        if (string.IsNullOrWhiteSpace(link)) throw new ValidationException(new[] { "Vui lòng nhập đường dẫn." });
+        ValidateTarget(target);
+        await using var db = await _factory.CreateDbContextAsync();
+        await CheckTargetExistsAsync(db, target);
+        var now = _clock.Now;
+        var a = new Attachment
+        {
+            Name = string.IsNullOrWhiteSpace(name) ? link.Trim() : name.Trim(), Link = link.Trim(), Kind = kind,
+            UploadedBy = Access.Current?.Name, CreatedAt = now, UpdatedAt = now
+        };
+        ApplyText(a, null);
+        db.Attachments.Add(a);
+        await db.SaveChangesAsync();
+        AddPlacement(db, a.Id, target, now);
+        AddHistory(db, target, now, $"Thêm đường dẫn: {a.Name}");
+        await db.SaveChangesAsync();
+        RaiseChanged();
+        return a;
+    }
+
+    public async Task UpdateMetaAsync(int id, AttachmentKind kind, DocumentStatus status, string? documentNumber)
+    {
+        Access.Require(UserRole.Editor);
+        await using var db = await _factory.CreateDbContextAsync();
+        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy tài liệu.");
+        a.Kind = kind;
+        a.DocumentStatus = status;
+        a.DocumentNumber = string.IsNullOrWhiteSpace(documentNumber) ? null : documentNumber.Trim();
+        a.UpdatedAt = _clock.Now;
+        Reindex(a);
+        await db.SaveChangesAsync();
+        RaiseChanged();
+    }
+
+    public async Task RenameAsync(int id, string name)
+    {
+        Access.Require(UserRole.Editor);
+        if (string.IsNullOrWhiteSpace(name)) throw new ValidationException(new[] { "Vui lòng nhập tên tài liệu." });
+        await using var db = await _factory.CreateDbContextAsync();
+        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy tài liệu.");
+        a.Name = name.Trim();
+        a.UpdatedAt = _clock.Now;
+        Reindex(a);
+        await db.SaveChangesAsync();
+        RaiseChanged();
+    }
+
+    // ---------------------------------------------------------------- Đọc nội dung để tìm kiếm
+
+    /// <summary>Đọc nội dung các tài liệu chưa lập chỉ mục (tài liệu có từ trước bản này). Trả về số tài liệu đã xử lý.</summary>
+    public async Task<int> IndexPendingAsync(int batch = 10)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        var pending = await db.Attachments.Where(a => a.ExtractedText == null && !a.IsDeleted).OrderBy(a => a.Id).Take(batch).ToListAsync();
+        foreach (var a in pending) await IndexAsync(db, a);
+        return pending.Count;
+    }
+
+    private async Task IndexAsync(AppDbContext db, Attachment a)
+    {
+        string? text = null;
+        if (a.StoredFile != null && TextExtractor.Supported.Contains(Path.GetExtension(a.StoredFile)) && a.SizeBytes <= MaxExtractBytes)
+        {
+            var full = ResolveStoredPath(a.StoredFile);
+            try { if (full != null && File.Exists(full)) text = TextExtractor.Read(full); }
+            catch (Exception ex) { AppLog.Error(ex, "Đọc nội dung tài liệu " + a.Name); }
+        }
+        ApplyText(a, text);
+        await db.SaveChangesAsync();
+    }
+
+    private static void ApplyText(Attachment a, string? text)
+    {
+        a.ExtractedText = text == null ? "" : text.Length > MaxExtractChars ? text[..MaxExtractChars] : text;
+        Reindex(a);
+    }
+
+    private static void Reindex(Attachment a) =>
+        a.SearchText = TextNormalizer.Normalize(string.Join(" ", a.Name, a.DocumentNumber, a.Link, a.ExtractedText));
+
+    // ---------------------------------------------------------------- Lưu tệp
+
+    private sealed record Stored(string Rel, string Name, long Size, string Sha256, string? Text);
+
+    private async Task<Stored> StoreAsync(Stream content, string fileName, long size)
     {
         var errors = new List<string>();
         var safeName = Path.GetFileName(fileName ?? "").Trim();
@@ -115,7 +431,6 @@ public sealed class AttachmentService
         var ext = Path.GetExtension(safeName);
         if (!AllowedExtensions.Contains(ext)) errors.Add($"Không hỗ trợ loại tệp \"{ext}\".");
         if (size > MaxBytes) errors.Add($"Tệp vượt quá {MaxBytes / 1024 / 1024} MB.");
-        if (taskId == null && projectId == null) errors.Add("Tài liệu phải gắn với một công việc hoặc dự án.");
         if (errors.Count > 0) throw new ValidationException(errors);
 
         var now = _clock.Now;
@@ -123,9 +438,17 @@ public sealed class AttachmentService
         var full = Path.Combine(FilesDir, rel);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
         long written;
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using (var fs = new FileStream(full, FileMode.CreateNew, FileAccess.Write))
         {
-            await content.CopyToAsync(fs);
+            var buffer = new byte[81920];
+            int n;
+            while ((n = await content.ReadAsync(buffer)) > 0)
+            {
+                sha.AppendData(buffer, 0, n);
+                await fs.WriteAsync(buffer.AsMemory(0, n));
+                if (fs.Length > MaxBytes) break;
+            }
             written = fs.Length;
         }
         if (written > MaxBytes)
@@ -133,60 +456,32 @@ public sealed class AttachmentService
             File.Delete(full);
             throw new ValidationException(new[] { $"Tệp vượt quá {MaxBytes / 1024 / 1024} MB." });
         }
-
-        await using var db = await _factory.CreateDbContextAsync();
-        var a = new Attachment
+        string? text = null;
+        if (TextExtractor.Supported.Contains(ext) && written <= MaxExtractBytes)
         {
-            Name = safeName, StoredFile = rel, SizeBytes = written, TaskId = taskId, ProjectId = projectId,
-            Kind = kind ?? GuessKind(safeName), CreatedAt = now
-        };
-        db.Attachments.Add(a);
-        if (taskId.HasValue)
-            db.TaskHistories.Add(new TaskHistory { TaskId = taskId.Value, At = now, Action = "Hồ sơ", Detail = $"Thêm tài liệu: {safeName}" });
-        await db.SaveChangesAsync();
-        return a;
+            try { text = TextExtractor.Read(full); }
+            catch (Exception ex) { AppLog.Error(ex, "Đọc nội dung tài liệu " + safeName); }
+        }
+        return new Stored(rel, safeName, written, Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant(), text);
     }
 
-    /// <summary>Thêm đường dẫn mạng nội bộ, thư mục hồ sơ hoặc liên kết web.</summary>
-    public async Task<Attachment> AddLinkAsync(string name, string link, AttachmentKind kind, int? taskId, int? projectId)
-    {
-        if (string.IsNullOrWhiteSpace(link)) throw new ValidationException(new[] { "Vui lòng nhập đường dẫn." });
-        if (taskId == null && projectId == null) throw new ValidationException(new[] { "Tài liệu phải gắn với một công việc hoặc dự án." });
-        await using var db = await _factory.CreateDbContextAsync();
-        var now = _clock.Now;
-        var a = new Attachment
+    internal static void AddPlacement(AppDbContext db, int attachmentId, DocTarget t, DateTime now) =>
+        db.AttachmentLinks.Add(new AttachmentLink
         {
-            Name = string.IsNullOrWhiteSpace(name) ? link.Trim() : name.Trim(), Link = link.Trim(), Kind = kind,
-            TaskId = taskId, ProjectId = projectId, CreatedAt = now
-        };
-        db.Attachments.Add(a);
-        if (taskId.HasValue)
-            db.TaskHistories.Add(new TaskHistory { TaskId = taskId.Value, At = now, Action = "Hồ sơ", Detail = $"Thêm đường dẫn: {a.Name}" });
-        await db.SaveChangesAsync();
-        return a;
+            AttachmentId = attachmentId, FolderId = t.FolderId, TaskId = t.TaskId, ProjectId = t.ProjectId, LegalDocumentId = t.LegalDocumentId, CreatedAt = now
+        });
+
+    internal static void AddHistory(AppDbContext db, DocTarget t, DateTime now, string detail)
+    {
+        if (t.TaskId is int taskId) db.TaskHistories.Add(new TaskHistory { TaskId = taskId, At = now, Action = "Hồ sơ", Detail = detail });
     }
 
-    public async Task UpdateMetaAsync(int id, AttachmentKind kind, DocumentStatus status, string? documentNumber)
+    /// <summary>Xóa tệp trên đĩa nếu không còn phiên bản/tài liệu nào dùng.</summary>
+    internal async Task DeleteStoredIfUnusedAsync(AppDbContext db, IEnumerable<string> rels)
     {
-        await using var db = await _factory.CreateDbContextAsync();
-        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id) ?? throw new InvalidOperationException("Không tìm thấy tài liệu.");
-        a.Kind = kind;
-        a.DocumentStatus = status;
-        a.DocumentNumber = string.IsNullOrWhiteSpace(documentNumber) ? null : documentNumber.Trim();
-        await db.SaveChangesAsync();
-    }
-
-    /// <summary>Xóa bản ghi tài liệu và tệp đã tải lên máy chủ (không đụng tới tệp gốc trên máy người dùng).</summary>
-    public async Task DeleteAsync(int id)
-    {
-        await using var db = await _factory.CreateDbContextAsync();
-        var a = await db.Attachments.FirstOrDefaultAsync(x => x.Id == id);
-        if (a == null) return;
-        db.Attachments.Remove(a);
-        if (a.TaskId.HasValue)
-            db.TaskHistories.Add(new TaskHistory { TaskId = a.TaskId.Value, At = _clock.Now, Action = "Hồ sơ", Detail = $"Gỡ tài liệu: {a.Name}" });
-        await db.SaveChangesAsync();
-        DeleteStored(a.StoredFile);
+        foreach (var rel in rels.Distinct())
+            if (!await db.AttachmentVersions.AnyAsync(v => v.StoredFile == rel) && !await db.Attachments.AnyAsync(a => a.StoredFile == rel))
+                DeleteStored(rel);
     }
 
     private void DeleteStored(string? rel)
@@ -226,6 +521,8 @@ public sealed class AttachmentService
         ".zip" => "application/zip",
         _ => "application/octet-stream"
     };
+
+    public static bool IsImage(string name) => Path.GetExtension(name).ToLowerInvariant() is ".png" or ".jpg" or ".jpeg" or ".gif";
 
     public static string SizeText(long bytes) => bytes <= 0 ? "" :
         bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB" : $"{bytes / 1024.0 / 1024.0:0.##} MB";

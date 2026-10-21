@@ -28,6 +28,8 @@ else
                 @if (_t.IsBlocked) { <span class="badge b-orange">Chờ @string.Join(", ", _t.BlockedBy)</span> }
             </div>
         </div>
+        @if (CanEdit)
+        {
         <div class="row">
             @if (!StatusGroups.IsClosed(_t.Status))
             {
@@ -37,6 +39,7 @@ else
             <StatusMenu Item="_t" />
             <button class="btn primary" @onclick="() => OpenEditor(_t.Id)"><Icon Name="edit" Class="sm" />Sửa</button>
         </div>
+        }
     </div>
 
     @if (_assessment != null && !StatusGroups.IsClosed(_t.Status))
@@ -213,7 +216,7 @@ else
     }
 
     /// <summary>Còn thêm được công việc con dưới một nút của cây (level 0 = chính công việc đang xem).</summary>
-    private bool CanAddChild(int level) => _ancestors.Count + level < TaskService.MaxSubtaskDepth;
+    private bool CanAddChild(int level) => CanEdit && _ancestors.Count + level < TaskService.MaxSubtaskDepth;
 
     private static string LevelName(int depth) => depth switch
     {

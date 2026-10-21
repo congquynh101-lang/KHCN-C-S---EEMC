@@ -1,0 +1,242 @@
+@* Chi tiết một tài liệu: xem trước, phiên bản, nơi đặt (một tệp ở nhiều nơi, không nhân bản) *@
+@inject AttachmentService Attachments
+@inject DocumentService Docs
+@inject UiService UiSvc
+
+<div class="overlay" @onclick="Close">
+    <div class="dialog wide" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <h2 style="margin:0" class="ellipsis">@(_a?.Name ?? "Tài liệu")</h2>
+            @if (_a?.IsDeleted == true) { <span class="badge b-red">Trong thùng rác</span> }
+            <span class="spacer"></span>
+            @if (_a?.StoredFile != null) { <a class="btn sm" href="/files/@AttachmentId"><Icon Name="download" Class="sm" />Tải về</a> }
+            <button class="btn ghost icon-only" @onclick="Close"><Icon Name="close" /></button>
+        </div>
+        @if (_a == null)
+        {
+            <div class="muted">Đang tải...</div>
+        }
+        else
+        {
+            <div class="tabs">
+                <button class="@(_tab == "view" ? "on" : "")" @onclick='() => _tab = "view"'>Xem trước</button>
+                <button class="@(_tab == "ver" ? "on" : "")" @onclick='() => _tab = "ver"'>Phiên bản (@_versions.Count)</button>
+                <button class="@(_tab == "info" ? "on" : "")" @onclick='() => _tab = "info"'>Nơi đặt, thông tin (@_places.Count)</button>
+            </div>
+
+            @if (_tab == "view")
+            {
+                @if (_a.StoredFile == null)
+                {
+                    <div class="card">Tài liệu dạng đường dẫn: @if (_a.Link!.StartsWith("http", StringComparison.OrdinalIgnoreCase)) { <a href="@_a.Link" target="_blank" rel="noopener">@_a.Link</a> } else { <code>@_a.Link</code> }</div>
+                }
+                else if (_a.StoredFile.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    <iframe class="doc-preview" src="/files/@AttachmentId?inline=true" title="Xem trước @_a.Name"></iframe>
+                }
+                else if (AttachmentService.IsImage(_a.StoredFile))
+                {
+                    <img src="/files/@AttachmentId?inline=true" alt="@_a.Name" style="max-width:100%;max-height:68vh;border-radius:8px" />
+                }
+                else if (!string.IsNullOrEmpty(_a.ExtractedText))
+                {
+                    <div class="muted small mb-s">Xem nhanh dạng chữ (định dạng gốc xem khi tải về).@(_a.ExtractedText.Length > PreviewChars ? $" Hiển thị {PreviewChars:N0} ký tự đầu." : "")</div>
+                    <pre class="doc-text">@(_a.ExtractedText.Length > PreviewChars ? _a.ExtractedText[..PreviewChars] : _a.ExtractedText)</pre>
+                }
+                else
+                {
+                    <div class="card empty">Không xem trước được loại tệp này@(_a.ExtractedText == null ? " (nội dung đang chờ đọc)" : "") — hãy tải về để mở.</div>
+                }
+            }
+            else if (_tab == "ver")
+            {
+                @if (CanEdit && _a.StoredFile != null && !_a.IsDeleted)
+                {
+                    <div class="row mb">
+                        <input class="input" style="max-width:320px" placeholder="Ghi chú cho phiên bản mới (tùy chọn)" @bind="_note" />
+                        <label class="btn primary" style="cursor:pointer">
+                            <Icon Name="upload" Class="sm" />Tải lên phiên bản mới
+                            <InputFile OnChange="UploadVersionAsync" style="display:none" />
+                        </label>
+                        @if (_busy) { <span class="muted">Đang tải lên...</span> }
+                    </div>
+                }
+                @if (_versions.Count == 0) { <div class="empty">Tài liệu dạng đường dẫn không có phiên bản tệp.</div> }
+                else
+                {
+                    <div class="table-wrap">
+                        <table class="data">
+                            <thead><tr><th>Bản</th><th>Tệp</th><th>Dung lượng</th><th>Thời điểm</th><th>Người tải</th><th>Ghi chú</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var v in _versions)
+                                {
+                                    var ver = v;
+                                    <tr>
+                                        <td class="nowrap"><b>v@(v.VersionNo)</b> @if (v.VersionNo == _a.CurrentVersion) { <span class="badge b-green">Hiện hành</span> }</td>
+                                        <td class="title">@v.FileName</td>
+                                        <td class="nowrap small">@AttachmentService.SizeText(v.SizeBytes)</td>
+                                        <td class="nowrap small">@Ui.Dt(v.UploadedAt)</td>
+                                        <td class="small">@(v.UploadedBy ?? "—")</td>
+                                        <td class="small">@v.Note</td>
+                                        <td class="nowrap">
+                                            <a class="btn sm ghost icon-only" href="/files/@AttachmentId?v=@v.VersionNo" title="Tải phiên bản này"><Icon Name="download" Class="sm" /></a>
+                                            @if (CanEdit && !_a.IsDeleted && v.VersionNo != _a.CurrentVersion) { <button class="btn sm ghost" @onclick="() => RestoreVersionAsync(ver)">Khôi phục</button> }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="grid grid-2">
+                    <div>
+                        <h3>Nơi đặt tài liệu</h3>
+                        <div class="muted small mb-s">Một tài liệu có thể nằm ở nhiều nơi; tệp chỉ lưu một lần trên máy chủ.</div>
+                        @if (_places.Count == 0) { <div class="empty">Chưa đặt ở đâu.</div> }
+                        @foreach (var p in _places)
+                        {
+                            var pl = p;
+                            <div class="timeline-item">
+                                <Icon Name="@(p.Target.FolderId != null ? "folder" : p.Target.TaskId != null ? "list" : p.Target.ProjectId != null ? "project" : "law")" Class="sm" />
+                                <a class="spacer" href="@p.Href">@p.Label</a>
+                                @if (CanEdit && !_a.IsDeleted) { <button class="btn sm ghost" @onclick="() => RemovePlaceAsync(pl)">Gỡ</button> }
+                            </div>
+                        }
+                        @if (CanEdit && !_a.IsDeleted) { <button class="btn sm mt-s" @onclick="() => _pick = true"><Icon Name="link" Class="sm" />Gắn thêm vào…</button> }
+                    </div>
+                    <div>
+                        <h3>Thông tin</h3>
+                        @if (CanEdit && !_a.IsDeleted)
+                        {
+                            <label class="field"><span>Tên tài liệu</span>
+                                <div class="row nowrap"><input class="input" @bind="_name" /><button class="btn sm" @onclick="RenameAsync">Đổi tên</button></div>
+                            </label>
+                            <div class="grid grid-3">
+                                <label class="field"><span>Loại</span>
+                                    <select class="input" @bind="_kind">@foreach (var k in Enum.GetValues<AttachmentKind>()) { <option value="@k">@Labels.Of(k)</option> }</select>
+                                </label>
+                                <label class="field"><span>Số văn bản</span><input class="input" @bind="_number" /></label>
+                                <label class="field"><span>Tình trạng</span>
+                                    <select class="input" @bind="_status">@foreach (var d in Enum.GetValues<DocumentStatus>()) { <option value="@d">@Labels.Of(d)</option> }</select>
+                                </label>
+                            </div>
+                            <button class="btn sm" @onclick="SaveMetaAsync">Lưu thông tin</button>
+                        }
+                        else
+                        {
+                            <div class="small">Loại: @Labels.Of(_a.Kind) · Số văn bản: @(_a.DocumentNumber ?? "—") · Tình trạng: @Labels.Of(_a.DocumentStatus)</div>
+                        }
+                        <div class="small muted mt">
+                            Người tải lên: @(_a.UploadedBy ?? "—") · Thêm: @Ui.Dt(_a.CreatedAt) · Cập nhật: @Ui.Dt(_a.UpdatedAt)<br />
+                            @if (_a.StoredFile != null) { <text>Phiên bản hiện hành v@(_a.CurrentVersion), @AttachmentService.SizeText(_a.SizeBytes)@(_a.Sha256 != null ? $" · SHA-256 {_a.Sha256[..12]}…" : "")</text> }
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@if (_pick)
+{
+    <DocPicker Title="Gắn tài liệu thêm vào" ForFiles="true" OnClose="() => _pick = false" OnPick="AddPlaceAsync" />
+}
+
+@code {
+    private const int PreviewChars = 30000;
+
+    [Parameter, EditorRequired] public int AttachmentId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    /// <summary>Báo trang gọi tải lại (đổi tên, gỡ, thêm phiên bản...).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [CascadingParameter(Name = "UserRole")] public UserRole Role { get; set; } = UserRole.Viewer;
+
+    private bool CanEdit => Role >= UserRole.Editor;
+    private Attachment? _a;
+    private List<AttachmentVersion> _versions = new();
+    private List<PlaceInfo> _places = new();
+    private string _tab = "view", _note = "", _name = "", _number = "";
+    private AttachmentKind _kind;
+    private DocumentStatus _status;
+    private bool _busy, _pick, _changed;
+    private int _loadedId;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != AttachmentId) { _loadedId = AttachmentId; await LoadAsync(); }
+    }
+
+    private async Task LoadAsync()
+    {
+        _a = await Attachments.GetAsync(AttachmentId);
+        if (_a == null) { UiSvc.Error("Không tìm thấy tài liệu."); await OnClose.InvokeAsync(); return; }
+        _versions = await Attachments.GetVersionsAsync(AttachmentId);
+        _places = await Attachments.GetPlacesAsync(AttachmentId);
+        _name = _a.Name;
+        _number = _a.DocumentNumber ?? "";
+        _kind = _a.Kind;
+        _status = _a.DocumentStatus;
+    }
+
+    private async Task Close()
+    {
+        if (_changed) await OnChanged.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task Run(Func<Task> action, string ok, string fail)
+    {
+        try
+        {
+            await action();
+            _changed = true;
+            if (ok.Length > 0) UiSvc.Success(ok);
+            await LoadAsync();
+        }
+        catch (Exception ex) { UiSvc.Error(ex, fail); }
+    }
+
+    private async Task UploadVersionAsync(InputFileChangeEventArgs e)
+    {
+        if (e.File.Size > AttachmentService.MaxBytes) { UiSvc.Error($"Tệp vượt quá {AttachmentService.MaxBytes / 1024 / 1024} MB."); return; }
+        _busy = true;
+        await Run(async () =>
+        {
+            await using var s = e.File.OpenReadStream(AttachmentService.MaxBytes);
+            var v = await Attachments.UploadVersionAsync(AttachmentId, s, e.File.Name, e.File.Size, _note);
+            _note = "";
+        }, "Đã tải lên phiên bản mới.", "Không tải được phiên bản mới");
+        _busy = false;
+    }
+
+    private async Task RestoreVersionAsync(AttachmentVersion v)
+    {
+        if (!await UiSvc.ConfirmAsync($"Đưa phiên bản v{v.VersionNo} trở lại làm hiện hành?\nPhiên bản hiện tại vẫn được giữ trong lịch sử.", "Khôi phục")) return;
+        await Run(() => Attachments.RestoreVersionAsync(AttachmentId, v.VersionNo), $"Đã khôi phục từ v{v.VersionNo}.", "Không khôi phục được");
+    }
+
+    private async Task RemovePlaceAsync(PlaceInfo p)
+    {
+        var last = _places.Count == 1;
+        if (!await UiSvc.ConfirmAsync($"Gỡ tài liệu khỏi \"{p.Label}\"?" + (last ? "\nĐây là nơi cuối cùng: tài liệu sẽ vào thùng rác." : ""), "Gỡ", danger: last)) return;
+        await Run(async () =>
+        {
+            var trashed = await Docs.RemovePlacementAsync(p.LinkId);
+            UiSvc.Success(trashed ? "Đã gỡ; tài liệu vào thùng rác." : "Đã gỡ tài liệu khỏi nơi này.");
+        }, "", "Không gỡ được");
+    }
+
+    private async Task AddPlaceAsync(string key)
+    {
+        _pick = false;
+        if (DocTree.Target(key) is not DocTarget t) return;
+        await Run(() => Docs.AddPlacementAsync(AttachmentId, t), "Đã gắn thêm (không sao chép tệp).", "Không gắn được");
+    }
+
+    private Task RenameAsync() => Run(() => Attachments.RenameAsync(AttachmentId, _name), "Đã đổi tên.", "Không đổi được tên");
+
+    private Task SaveMetaAsync() => Run(() => Attachments.UpdateMetaAsync(AttachmentId, _kind, _status, _number), "Đã lưu thông tin.", "Không lưu được");
+}

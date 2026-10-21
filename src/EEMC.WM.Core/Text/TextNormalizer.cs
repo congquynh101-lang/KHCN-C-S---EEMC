@@ -28,4 +28,26 @@ public static class TextNormalizer
         }
         return sb.ToString().Normalize(NormalizationForm.FormC);
     }
+
+    /// <summary>
+    /// Bỏ dấu, chữ thường, giữ nguyên độ dài chuỗi (mỗi ký tự thay bằng một ký tự) để vị trí tìm được
+    /// trên chuỗi đã bỏ dấu dùng được để cắt trích đoạn trên chuỗi gốc.
+    /// </summary>
+    public static string Fold(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var chars = new char[s.Length];
+        for (int i = 0; i < s.Length; i++)
+        {
+            var c = char.ToLowerInvariant(s[i]);
+            if (c == 'đ') c = 'd';
+            else if (c > 127 && char.IsLetter(c))
+            {
+                var d = c.ToString().Normalize(NormalizationForm.FormD);
+                if (d.Length > 0 && d[0] < 128) c = d[0];
+            }
+            chars[i] = char.IsWhiteSpace(c) ? ' ' : c;
+        }
+        return new string(chars);
+    }
 }

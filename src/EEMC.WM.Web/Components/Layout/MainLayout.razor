@@ -30,6 +30,7 @@
             <NavLink href="documents"><Icon Name="file" />Hồ sơ tài liệu</NavLink>
             <NavLink href="legal"><Icon Name="law" />Văn bản pháp luật</NavLink>
             <NavLink href="reports"><Icon Name="report" />Báo cáo</NavLink>
+            @if (_role == UserRole.Admin) { <NavLink href="users"><Icon Name="people" />Người dùng</NavLink> }
             <NavLink href="settings"><Icon Name="settings" />Cài đặt</NavLink>
         </nav>
         <div class="sidebar-foot">
@@ -37,7 +38,7 @@
                 <Authorized>
                     <div class="row nowrap">
                         <Icon Name="people" />
-                        <span class="ellipsis spacer">@context.User.Identity?.Name</span>
+                        <span class="ellipsis spacer" title="@Labels.Of(_role)">@context.User.Identity?.Name <span class="tertiary small">· @Labels.Of(_role)</span></span>
                         <form method="post" action="/account/logout">
                             <button class="btn ghost sm" type="submit" title="Đăng xuất"><Icon Name="logout" Class="sm" /></button>
                         </form>
@@ -55,9 +56,12 @@
                 <Icon Name="search" Class="sm" />
                 <input id="global-search" class="input" placeholder="Tìm công việc, dự án, số văn bản...  ( / )" @bind="_search" @bind:event="oninput" @onkeydown="OnSearchKey" />
             </div>
-            <button class="btn primary" @onclick="() => UiSvc.RequestEditor(new EditorRequest(null))" title="Phím tắt: N">
-                <Icon Name="plus" Class="sm" /><span class="hide-mobile">Thêm công việc</span>
-            </button>
+            @if (_role >= UserRole.Editor)
+            {
+                <button class="btn primary" @onclick="() => UiSvc.RequestEditor(new EditorRequest(null))" title="Phím tắt: N">
+                    <Icon Name="plus" Class="sm" /><span class="hide-mobile">Thêm công việc</span>
+                </button>
+            }
             <div class="spacer"></div>
             <div class="hide-mobile right" style="line-height:1.2">
                 <div style="font-weight:600;font-size:16px">@Clock.Now.ToString("HH:mm")</div>
@@ -109,13 +113,14 @@
         </header>
         <main class="page">
             <ErrorBoundary @ref="_errorBoundary">
-                <ChildContent>@Body</ChildContent>
+                <ChildContent><CascadingValue Value="_role" Name="UserRole">@Body</CascadingValue></ChildContent>
             </ErrorBoundary>
         </main>
     </div>
 </div>
 
 <TaskEditorDialog />
+<CascadingValue Value="_role" Name="UserRole"><ChatWidget /></CascadingValue>
 
 @if (UiSvc.ConfirmMessage != null)
 {
@@ -146,8 +151,12 @@
     private ErrorBoundary? _errorBoundary;
     private DotNetObjectReference<MainLayout>? _self;
 
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private UserRole _role = UserRole.Viewer;
+
     protected override async Task OnInitializedAsync()
     {
+        if (AuthState != null) _role = AccessWiring.RoleOf((await AuthState).User);
         UiSvc.Changed += OnUiChanged;
         Bus.Published += OnPublished;
         Notifications.Changed += OnNotificationsChanged;
@@ -173,7 +182,7 @@
     [JSInvokable]
     public async Task OnShortcut(string key)
     {
-        if (key == "new") UiSvc.RequestEditor(new EditorRequest(null));
+        if (key == "new" && _role >= UserRole.Editor) UiSvc.RequestEditor(new EditorRequest(null));
         else if (key == "search") await JS.InvokeVoidAsync("eemc.focus", "global-search");
     }
 

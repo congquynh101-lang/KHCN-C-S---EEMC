@@ -4,6 +4,7 @@ using EEMC.WM.Core.Time;
 using EEMC.WM.Data.Services;
 using EEMC.WM.Web.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 
 namespace EEMC.WM.Web.Components.Shared;
 
@@ -18,12 +19,26 @@ public abstract class LivePage : ComponentBase, IDisposable
     [Inject] protected UiService UiSvc { get; set; } = default!;
     [Inject] protected NavigationManager Nav { get; set; } = default!;
 
+    [CascadingParameter] private Task<AuthenticationState>? PageAuthState { get; set; }
+
     protected DateTime Now => Clock.Now;
     protected bool Loading { get; set; } = true;
+    /// <summary>Vai trò để ẩn/hiện nút trên giao diện; quyền thật được kiểm tra trong dịch vụ dữ liệu.</summary>
+    protected UserRole Role { get; private set; } = UserRole.Viewer;
+    protected bool CanEdit => Role >= UserRole.Editor;
+    protected bool IsAdmin => Role == UserRole.Admin;
+    /// <summary>Tên hiển thị của người đang đăng nhập.</summary>
+    protected string UserName { get; private set; } = "";
     private CancellationTokenSource? _debounce;
 
     protected override async Task OnInitializedAsync()
     {
+        if (PageAuthState != null)
+        {
+            var user = (await PageAuthState).User;
+            Role = AccessWiring.RoleOf(user);
+            UserName = user.Identity?.Name ?? "";
+        }
         Tasks.TasksChanged += OnDataChanged;
         Settings.Changed += OnDataChanged;
         await SafeLoadAsync();

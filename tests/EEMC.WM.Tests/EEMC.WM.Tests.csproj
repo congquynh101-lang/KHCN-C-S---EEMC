@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\EEMC.WM.Core\EEMC.WM.Core.csproj" />
     <ProjectReference Include="..\..\src\EEMC.WM.Data\EEMC.WM.Data.csproj" />
+    <ProjectReference Include="..\..\src\EEMC.WM.Web\EEMC.WM.Web.csproj" />
   </ItemGroup>
 
 </Project>

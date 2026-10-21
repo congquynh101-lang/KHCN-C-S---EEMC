@@ -75,6 +75,61 @@ public sealed class LegalService
         return d;
     }
 
+    // ---------------------------------------------------------------- Cây: Loại → Văn bản → Phần/Chương/Mục/Điều
+
+    public async Task<Dictionary<LegalDocType, int>> CountByTypeAsync()
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        return await db.LegalDocuments.GroupBy(d => d.DocType).Select(g => new { g.Key, N = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.N);
+    }
+
+    /// <summary>Văn bản của một loại, kèm số mục đã tách trong toàn văn (0 = chưa có toàn văn).</summary>
+    public async Task<List<(LegalDocument Doc, int Sections)>> GetByTypeAsync(LegalDocType type)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        var docs = await db.LegalDocuments.AsNoTracking().Where(d => d.DocType == type)
+            .OrderByDescending(d => d.IssuedDate ?? d.CreatedAt).ThenByDescending(d => d.Id)
+            .Select(d => new LegalDocument { Id = d.Id, Number = d.Number, Title = d.Title, DocType = d.DocType, Effect = d.Effect, EffectiveDate = d.EffectiveDate })
+            .ToListAsync();
+        var ids = docs.Select(d => d.Id).ToList();
+        var counts = await db.LegalSections.Where(s => ids.Contains(s.DocumentId)).GroupBy(s => s.DocumentId)
+            .Select(g => new { g.Key, N = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.N);
+        return docs.Select(d => (d, counts.GetValueOrDefault(d.Id))).ToList();
+    }
+
+    /// <summary>Mục lục (không kèm nội dung điều) theo thứ tự trong văn bản.</summary>
+    public async Task<List<LegalSection>> GetOutlineAsync(int documentId)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        return await db.LegalSections.AsNoTracking().Where(s => s.DocumentId == documentId).OrderBy(s => s.SortOrder)
+            .Select(s => new LegalSection { Id = s.Id, DocumentId = s.DocumentId, Kind = s.Kind, Number = s.Number, Heading = s.Heading, SortOrder = s.SortOrder })
+            .ToListAsync();
+    }
+
+    /// <summary>Điều có tên hoặc nội dung chứa mọi từ tìm kiếm (không phân biệt dấu), trong tối đa 20 văn bản phù hợp.</summary>
+    public async Task<List<(int DocumentId, LegalDocType Type, int SortOrder)>> SearchArticlesAsync(string text, int take = 30)
+    {
+        var terms = TextNormalizer.Normalize(text).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (terms.Length == 0) return new();
+        await using var db = await _factory.CreateDbContextAsync();
+        var q = db.LegalDocuments.AsQueryable();
+        foreach (var term in terms) q = q.Where(d => d.SearchText.Contains(term));
+        var docs = await q.Select(d => new { d.Id, d.DocType }).Take(20).ToListAsync();
+        var result = new List<(int, LegalDocType, int)>();
+        foreach (var d in docs)
+        {
+            var sections = await db.LegalSections.AsNoTracking().Where(s => s.DocumentId == d.Id && s.Kind == LegalSectionKind.Article)
+                .OrderBy(s => s.SortOrder).ToListAsync();
+            foreach (var s in sections)
+            {
+                var hay = TextNormalizer.Normalize(s.Number + " " + s.Heading + " " + s.Body);
+                if (terms.All(hay.Contains)) result.Add((d.Id, d.DocType, s.SortOrder));
+                if (result.Count >= take) return result;
+            }
+        }
+        return result;
+    }
+
     /// <summary>Văn bản sắp có hiệu lực hoặc sắp hết hiệu lực trong <paramref name="days"/> ngày tới.</summary>
     public async Task<List<LegalDocument>> GetUpcomingAsync(int days = 30)
     {
@@ -93,6 +148,7 @@ public sealed class LegalService
     /// <summary>Lưu thông tin văn bản và toàn văn; mục lục được tách lại khi toàn văn thay đổi.</summary>
     public async Task<LegalDocument> SaveAsync(LegalDocument input)
     {
+        Access.Require(UserRole.Editor);
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(input.Title)) errors.Add("Vui lòng nhập tên (trích yếu) văn bản.");
         if (input.IssuedDate.HasValue && input.EffectiveDate.HasValue && input.EffectiveDate < input.IssuedDate)
@@ -158,6 +214,7 @@ public sealed class LegalService
     /// <summary>Đánh dấu đã kiểm tra tình trạng hiệu lực hôm nay (không đổi tình trạng).</summary>
     public async Task MarkEffectCheckedAsync(int id)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         await db.LegalDocuments.Where(d => d.Id == id).ExecuteUpdateAsync(s => s.SetProperty(d => d.EffectCheckedAt, _clock.Now));
         Changed?.Invoke(this, EventArgs.Empty);
@@ -166,6 +223,7 @@ public sealed class LegalService
     /// <summary>Xóa văn bản. Văn bản khác đang trỏ tới vẫn giữ tên văn bản này trong quan hệ.</summary>
     public async Task DeleteAsync(int id)
     {
+        Access.Require(UserRole.Admin);
         await using var db = await _factory.CreateDbContextAsync();
         var d = await db.LegalDocuments.FirstOrDefaultAsync(x => x.Id == id);
         if (d == null) return;
@@ -177,6 +235,7 @@ public sealed class LegalService
         }
         await db.LegalRelations.Where(r => r.DocumentId == id).ExecuteDeleteAsync();
         await db.LegalTaskLinks.Where(l => l.DocumentId == id).ExecuteDeleteAsync();
+        await DocumentService.DetachOwnerAsync(db, new DocOwner(LegalDocumentId: id), d.Number ?? "Văn bản", _clock.Now);
         db.LegalDocuments.Remove(d);
         await db.SaveChangesAsync();
         DeleteStored(d.StoredFile);
@@ -188,6 +247,7 @@ public sealed class LegalService
     /// <summary>Lưu tệp gốc (PDF có lớp chữ, DOCX, TXT) và trích toàn văn. Tệp gốc không bị sửa.</summary>
     public async Task<LegalFileResult> StoreFileAsync(Stream content, string fileName, long size)
     {
+        Access.Require(UserRole.Editor);
         var safeName = Path.GetFileName(fileName ?? "").Trim();
         var ext = Path.GetExtension(safeName);
         var errors = new List<string>();
@@ -225,6 +285,7 @@ public sealed class LegalService
     /// <summary>Bỏ tệp đã tải lên nhưng chưa lưu vào văn bản nào.</summary>
     public async Task DiscardFileAsync(string storedFile)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         if (await db.LegalDocuments.AnyAsync(d => d.StoredFile == storedFile)) return;
         DeleteStored(storedFile);
@@ -233,47 +294,12 @@ public sealed class LegalService
     public static (string? Text, string? Warning) ExtractText(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
-        string text = ext switch
-        {
-            ".pdf" => ReadPdf(path),
-            ".docx" => ReadDocx(path),
-            ".txt" => File.ReadAllText(path),
-            _ => ""
-        };
-        text = text.Normalize(NormalizationForm.FormC).Trim();
+        var text = TextExtractor.Read(path);
         int letters = text.Count(char.IsLetter);
         if (ext == ".pdf" && letters < 200)
             return (null, "PDF không có lớp chữ (bản quét). Phần mềm không tự nhận dạng chữ; hãy dán toàn văn từ nguồn chính thức.");
         if (letters == 0) return (null, "Tệp không có nội dung chữ.");
         return (text, ext == ".pdf" ? "Toàn văn trích từ PDF có thể sai xuống dòng hoặc dấu cách. Hãy đối chiếu với bản gốc trước khi lưu." : null);
-    }
-
-    private static string ReadPdf(string path)
-    {
-        var sb = new StringBuilder();
-        using var pdf = PdfDocument.Open(path);
-        foreach (var page in pdf.GetPages())
-            sb.AppendLine(ContentOrderTextExtractor.GetText(page));
-        return sb.ToString();
-    }
-
-    private static string ReadDocx(string path)
-    {
-        var sb = new StringBuilder();
-        using var doc = WordprocessingDocument.Open(path, false);
-        var body = doc.MainDocumentPart?.Document?.Body;
-        if (body == null) return "";
-        foreach (var p in body.Descendants<W.Paragraph>())
-        {
-            foreach (var el in p.Descendants())
-            {
-                if (el is W.Text t) sb.Append(t.Text);
-                else if (el is W.TabChar) sb.Append(' ');
-                else if (el is W.Break) sb.Append('\n');
-            }
-            sb.Append('\n');
-        }
-        return sb.ToString();
     }
 
     public string? ResolveStoredPath(string rel)
@@ -303,21 +329,29 @@ public sealed class LegalService
     /// </summary>
     public async Task SaveSummaryAsync(int documentId, string? about, string? applies, IEnumerable<LegalPoint> points, string author)
     {
+        Access.Require(UserRole.Editor);
         var list = points.Where(p => !string.IsNullOrWhiteSpace(p.Text)).ToList();
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(about) && string.IsNullOrWhiteSpace(applies) && list.Count == 0)
             errors.Add("Bản rút gọn đang trống.");
         foreach (var p in list.Where(p => p.Kind != LegalPointKind.Step && string.IsNullOrWhiteSpace(p.Citation)))
             errors.Add($"Thiếu điều khoản căn cứ cho: \"{Shorten(p.Text)}\".");
-        if (errors.Count > 0) throw new ValidationException(errors);
 
         await using var db = await _factory.CreateDbContextAsync();
         var d = await db.LegalDocuments.FirstOrDefaultAsync(x => x.Id == documentId) ?? throw new InvalidOperationException("Không tìm thấy văn bản.");
+        // Dẫn nguồn chính xác: căn cứ phải trỏ tới điều/khoản/điểm có thật trong toàn văn (khi đã nhập toàn văn)
+        var sections = await db.LegalSections.AsNoTracking().Where(s => s.DocumentId == documentId && s.Kind == LegalSectionKind.Article).ToListAsync();
+        foreach (var p in list.Where(p => !string.IsNullOrWhiteSpace(p.Citation)))
+        {
+            var (_, error) = LegalTextParser.Locate(sections, LegalTextParser.ParseCitation(p.Citation));
+            if (error != null) errors.Add($"Căn cứ \"{p.Citation!.Trim()}\" ({Shorten(p.Text)}): {error}.");
+        }
+        if (errors.Count > 0) throw new ValidationException(errors);
         var now = _clock.Now;
         d.SummaryAbout = Clean(about);
         d.SummaryApplies = Clean(applies);
         d.SummaryState = SummaryState.Draft;
-        d.SummaryAuthor = author;
+        d.SummaryAuthor = Access.Current?.Name ?? author; // ưu tiên người đăng nhập thật
         d.SummaryUpdatedAt = now;
         d.SummaryApprovedBy = null;
         d.SummaryApprovedAt = null;
@@ -340,11 +374,12 @@ public sealed class LegalService
     /// <summary>Duyệt bản rút gọn sau khi đã đối chiếu với toàn văn.</summary>
     public async Task ApproveSummaryAsync(int documentId, string approver)
     {
+        Access.Require(UserRole.Admin);
         await using var db = await _factory.CreateDbContextAsync();
         var d = await db.LegalDocuments.FirstOrDefaultAsync(x => x.Id == documentId) ?? throw new InvalidOperationException("Không tìm thấy văn bản.");
         if (d.SummaryState != SummaryState.Draft) throw new InvalidOperationException("Chỉ duyệt được bản rút gọn đang ở trạng thái \"Chưa duyệt\".");
         d.SummaryState = SummaryState.Approved;
-        d.SummaryApprovedBy = approver;
+        d.SummaryApprovedBy = Access.Current?.Name ?? approver;
         d.SummaryApprovedAt = _clock.Now;
         await db.SaveChangesAsync();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -353,6 +388,7 @@ public sealed class LegalService
     /// <summary>Hủy duyệt (ví dụ khi phát hiện bản rút gọn chưa đúng hoặc văn bản bị sửa đổi).</summary>
     public async Task RevokeApprovalAsync(int documentId)
     {
+        Access.Require(UserRole.Admin);
         await using var db = await _factory.CreateDbContextAsync();
         await db.LegalDocuments.Where(d => d.Id == documentId && d.SummaryState == SummaryState.Approved)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.SummaryState, SummaryState.Draft)
@@ -381,6 +417,7 @@ public sealed class LegalService
 
     public async Task AddRelationAsync(int documentId, LegalRelationKind kind, int? targetId, string? targetText)
     {
+        Access.Require(UserRole.Editor);
         if (targetId == null && string.IsNullOrWhiteSpace(targetText))
             throw new ValidationException(new[] { "Chọn văn bản trong thư viện hoặc nhập tên văn bản." });
         if (targetId == documentId) throw new ValidationException(new[] { "Văn bản không thể có quan hệ với chính nó." });
@@ -397,6 +434,7 @@ public sealed class LegalService
 
     public async Task DeleteRelationAsync(int relationId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         await db.LegalRelations.Where(r => r.Id == relationId).ExecuteDeleteAsync();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -413,6 +451,7 @@ public sealed class LegalService
 
     public async Task LinkTaskAsync(int documentId, int taskId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         if (!await db.Tasks.AnyAsync(t => t.Id == taskId && !t.IsDeleted)) throw new InvalidOperationException("Không tìm thấy công việc.");
         if (await db.LegalTaskLinks.AnyAsync(l => l.DocumentId == documentId && l.TaskId == taskId)) return;
@@ -423,6 +462,7 @@ public sealed class LegalService
 
     public async Task UnlinkTaskAsync(int documentId, int taskId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         await db.LegalTaskLinks.Where(l => l.DocumentId == documentId && l.TaskId == taskId).ExecuteDeleteAsync();
         await db.LegalPoints.Where(p => p.DocumentId == documentId && p.TaskId == taskId)
@@ -433,6 +473,7 @@ public sealed class LegalService
     /// <summary>Ghi nhận công việc đã tạo từ một việc cần làm và gắn công việc với văn bản.</summary>
     public async Task SetPointTaskAsync(int pointId, int taskId)
     {
+        Access.Require(UserRole.Editor);
         await using var db = await _factory.CreateDbContextAsync();
         var p = await db.LegalPoints.FirstOrDefaultAsync(x => x.Id == pointId) ?? throw new InvalidOperationException("Không tìm thấy việc cần làm.");
         p.TaskId = taskId;
