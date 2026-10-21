@@ -68,6 +68,9 @@ public sealed class TaskService
 
     // ------------------------------------------------------------------ Công việc con
 
+    /// <summary>Số cấp công việc con tối đa dưới một công việc gốc: con, cháu, chắt.</summary>
+    public const int MaxSubtaskDepth = 3;
+
     public async Task<List<WorkTask>> GetChildrenAsync(int parentId)
     {
         await using var db = await _factory.CreateDbContextAsync();
@@ -77,11 +80,87 @@ public sealed class TaskService
         return list;
     }
 
+    /// <summary>Các công việc cấp trên, từ công việc gốc đến công việc cha trực tiếp.</summary>
+    public async Task<List<WorkTask>> GetAncestorsAsync(int taskId)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        var ids = await AncestorIdsAsync(db, taskId);
+        var tasks = await db.Tasks.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id);
+        return Enumerable.Reverse(ids).Where(tasks.ContainsKey).Select(id => tasks[id]).ToList();
+    }
+
+    /// <summary>Toàn bộ công việc con các cấp, theo thứ tự cây (cha trước con); Level = 1 cho con trực tiếp.</summary>
+    public async Task<List<(WorkTask Task, int Level)>> GetSubtaskTreeAsync(int rootId)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+        var all = new List<WorkTask>();
+        var frontier = new List<int> { rootId };
+        var seen = new HashSet<int> { rootId };
+        for (var level = 1; level <= MaxSubtaskDepth + 2 && frontier.Count > 0; level++)
+        {
+            var kids = await db.Tasks.AsNoTracking()
+                .Where(t => t.ParentId != null && frontier.Contains(t.ParentId.Value) && !t.IsDeleted).ToListAsync();
+            kids = kids.Where(k => seen.Add(k.Id)).ToList();
+            all.AddRange(kids);
+            frontier = kids.Select(k => k.Id).ToList();
+        }
+        await FillDependenciesAsync(db, all);
+        return TaskTree.Flatten(all, t => t.PlannedStart ?? t.DueAt).Select(x => (x.Task, x.Level + 1)).ToList();
+    }
+
+    /// <summary>Id các công việc cấp trên, từ cha trực tiếp lên gốc (dừng nếu gặp vòng lặp).</summary>
+    private static async Task<List<int>> AncestorIdsAsync(AppDbContext db, int taskId)
+    {
+        var ids = new List<int>();
+        var cur = taskId;
+        for (var i = 0; i < 50; i++)
+        {
+            var pid = await db.Tasks.Where(t => t.Id == cur).Select(t => t.ParentId).FirstOrDefaultAsync();
+            if (pid == null || pid == taskId || ids.Contains(pid.Value)) break;
+            ids.Add(pid.Value);
+            cur = pid.Value;
+        }
+        return ids;
+    }
+
+    /// <summary>Số cấp công việc con bên dưới một công việc (0 nếu không có công việc con).</summary>
+    private static async Task<int> SubtreeHeightAsync(AppDbContext db, int taskId)
+    {
+        var frontier = new List<int> { taskId };
+        var seen = new HashSet<int> { taskId };
+        var height = 0;
+        while (height < 50)
+        {
+            var kids = (await db.Tasks.Where(t => t.ParentId != null && frontier.Contains(t.ParentId.Value) && !t.IsDeleted)
+                .Select(t => t.Id).ToListAsync()).Where(seen.Add).ToList();
+            if (kids.Count == 0) break;
+            height++;
+            frontier = kids;
+        }
+        return height;
+    }
+
+    /// <summary>Kiểm tra gắn công việc <paramref name="taskId"/> (null = công việc mới) vào công việc cha.</summary>
+    private static async Task ValidateParentAsync(AppDbContext db, int? taskId, int? parentId)
+    {
+        if (parentId == null) return;
+        if (taskId == parentId) throw new ValidationException(new[] { "Công việc không thể là công việc con của chính nó." });
+        if (!await db.Tasks.AnyAsync(t => t.Id == parentId && !t.IsDeleted))
+            throw new ValidationException(new[] { "Không tìm thấy công việc cha (có thể đã bị xóa)." });
+        var ancestors = await AncestorIdsAsync(db, parentId.Value);
+        if (taskId.HasValue && ancestors.Contains(taskId.Value))
+            throw new ValidationException(new[] { "Không thể chọn công việc con, cháu của chính công việc này làm công việc cha." });
+        var height = taskId.HasValue ? await SubtreeHeightAsync(db, taskId.Value) : 0;
+        if (ancestors.Count + 1 + height > MaxSubtaskDepth)
+            throw new ValidationException(new[] { $"Chỉ hỗ trợ tối đa {MaxSubtaskDepth} cấp công việc con (con, cháu, chắt)." });
+    }
+
     /// <summary>Tạo công việc con, kế thừa dự án/nhóm/người giao của công việc cha.</summary>
     public async Task<WorkTask> CreateSubtaskAsync(int parentId, WorkTask child)
     {
         var parent = await GetAsync(parentId) ?? throw new InvalidOperationException("Không tìm thấy công việc cha.");
-        if (parent.ParentId != null) throw new ValidationException(new[] { "Chỉ hỗ trợ một cấp công việc con." });
+        await using (var db = await _factory.CreateDbContextAsync())
+            await ValidateParentAsync(db, null, parentId);
         child.ParentId = parentId;
         child.ProjectId ??= parent.ProjectId;
         child.ProjectName ??= parent.ProjectName;
@@ -93,20 +172,25 @@ public sealed class TaskService
         return created;
     }
 
-    /// <summary>Cập nhật tiến độ công việc cha theo các công việc con (không tự đổi trạng thái).</summary>
+    /// <summary>
+    /// Cập nhật tiến độ công việc cha theo các công việc con, rồi dồn tiếp lên các cấp trên
+    /// (không tự đổi trạng thái).
+    /// </summary>
     public async Task RecalcParentAsync(int? parentId)
     {
-        if (parentId == null) return;
-        await using var db = await _factory.CreateDbContextAsync();
-        var parent = await db.Tasks.FirstOrDefaultAsync(t => t.Id == parentId);
-        if (parent == null) return;
-        var children = await db.Tasks.AsNoTracking().Where(t => t.ParentId == parentId).ToListAsync();
-        var p = ProgressCalculator.Weighted(children);
-        if (p.HasValue && parent.Progress != p.Value)
+        var seen = new HashSet<int>();
+        while (parentId is int pid && seen.Add(pid))
         {
+            await using var db = await _factory.CreateDbContextAsync();
+            var parent = await db.Tasks.FirstOrDefaultAsync(t => t.Id == pid);
+            if (parent == null) return;
+            var children = await db.Tasks.AsNoTracking().Where(t => t.ParentId == pid).ToListAsync();
+            var p = ProgressCalculator.Weighted(children);
+            if (!p.HasValue || parent.Progress == p.Value) return; // cấp trên không đổi
             parent.Progress = p.Value;
             parent.UpdatedAt = _clock.Now;
             await db.SaveChangesAsync();
+            parentId = parent.ParentId;
         }
     }
 
@@ -418,7 +502,7 @@ public sealed class TaskService
         t.UpdatedAt = now;
         ApplyStatusTimestamps(t, oldStatus, now);
         t.RefreshSearchText();
-        if (t.ParentId == t.Id) throw new ValidationException(new[] { "Công việc không thể là công việc con của chính nó." });
+        if (t.ParentId != oldParent) await ValidateParentAsync(db, t.Id, t.ParentId);
 
         if (oldDue != t.DueAt)
         {

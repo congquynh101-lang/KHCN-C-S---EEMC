@@ -45,13 +45,13 @@
             </div>
         </div>
     }
-    @foreach (var t in _rows)
+    @foreach (var (t, level) in _rows)
     {
         var start = Start(t);
         var color = StatusGroups.IsClosed(t.Status) ? "green" : t.DueAt < Now ? "red" : t.Priority >= TaskPriority.High ? "orange" : "blue";
         <div class="gantt-row">
             <div class="gantt-label" title="@t.Code — @t.Title">
-                @if (t.ParentId != null) { <span style="padding-left:14px"></span> }
+                @if (level > 0) { <span style="padding-left:@Ui.Px(level * 14)"></span> }
                 <a href="/tasks/@t.Id">@t.Title</a>
             </div>
             <div class="gantt-track" style="min-width:@Ui.Px(Width)">
@@ -69,7 +69,7 @@
     private const double Px = 22;
     private int _days = 30, _projectId;
     private DateTime _from, _to;
-    private List<WorkTask> _rows = new();
+    private List<(WorkTask Task, int Level)> _rows = new();
     private List<Milestone> _milestones = new();
     private List<Project> _projects = new();
 
@@ -97,15 +97,8 @@
             list = await Tasks.GetOpenTasksAsync();
             _milestones = new();
         }
-        // Sắp cha trước con
+        // Sắp theo cây: cha trước con, cháu, chắt
         var inRange = list.Where(t => Start(t) < _to && t.DueAt >= _from).ToList();
-        var parents = inRange.Where(t => t.ParentId == null || inRange.All(p => p.Id != t.ParentId)).OrderBy(Start).ThenBy(t => t.DueAt).ToList();
-        _rows = new();
-        foreach (var p in parents)
-        {
-            _rows.Add(p);
-            _rows.AddRange(inRange.Where(c => c.ParentId == p.Id).OrderBy(Start));
-        }
-        _rows = _rows.Take(300).ToList();
+        _rows = TaskTree.Flatten(inRange, Start).Take(300).ToList();
     }
 }

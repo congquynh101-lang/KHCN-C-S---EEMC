@@ -53,13 +53,13 @@ else
                     @if (_legacy > 0) { <div class="mt"><button class="btn" @onclick="LinkLegacy">Gắn @_legacy công việc cũ có cùng tên dự án</button></div> }
                 </div>
             }
-            @foreach (var t in _tasks.Where(t => t.ParentId == null || _tasks.All(x => x.Id != t.ParentId)))
+            @foreach (var (t, descendants) in _groups)
             {
                 <TaskCard Item="t" ShowReasons="false">
                     <div class="small muted mt-s">Tiến độ @t.Progress% · Trọng số @t.Weight.ToString("0.##")</div>
-                    @foreach (var c in _tasks.Where(c => c.ParentId == t.Id))
+                    @foreach (var (c, level) in descendants)
                     {
-                        <div class="row small mt-s" style="padding-left:12px">
+                        <div class="row small mt-s" style="padding-left:@Ui.Px(level * 14)">
                             <Icon Name="sub" Class="sm" />
                             <a href="/tasks/@c.Id" class="spacer">@c.Title</a>
                             <span class="badge b-@Ui.StatusColor(c.Status)">@Labels.Of(c.Status)</span>
@@ -123,6 +123,8 @@ else
     [Parameter] public int Id { get; set; }
     private Project? _p;
     private List<WorkTask> _tasks = new();
+    /// <summary>Công việc gốc kèm toàn bộ công việc con các cấp (Level 1 = con, 2 = cháu, 3 = chắt).</summary>
+    private List<(WorkTask Root, List<(WorkTask Task, int Level)> Descendants)> _groups = new();
     private int? _progress;
     private int _legacy, _loadedId;
     private string _tab = "tasks", _msName = "";
@@ -141,6 +143,12 @@ else
         if (_p == null) return;
         _tasks = await Projects.GetTasksAsync(Id);
         _progress = ProgressCalculator.Weighted(_tasks.Where(t => t.ParentId == null || _tasks.All(x => x.Id != t.ParentId)));
+        _groups = new();
+        foreach (var (task, level) in TaskTree.Flatten(_tasks, t => t.PlannedStart ?? t.DueAt))
+        {
+            if (level == 0) _groups.Add((task, new()));
+            else _groups[^1].Descendants.Add((task, level));
+        }
         if (_tasks.Count == 0)
         {
             var key = TextNormalizer.Normalize(_p.Name);

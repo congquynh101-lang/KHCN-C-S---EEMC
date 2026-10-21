@@ -15,7 +15,7 @@ else
         <div style="flex:1 1 320px;min-width:0">
             <div class="muted">
                 <a href="/tasks">Công việc</a> ›
-                @if (_parent != null) { <a href="/tasks/@_parent.Id">@_parent.Code</a> <span>›</span> }
+                @foreach (var a in _ancestors) { <a href="/tasks/@a.Id" title="@a.Title">@a.Code</a><span> › </span> }
                 @_t.Code
                 @if (_t.IsDeleted) { <span class="badge b-red">Trong thùng rác</span> }
             </div>
@@ -50,7 +50,7 @@ else
 
     <div class="tabs">
         <button class="@(_tab == "info" ? "on" : "")" @onclick='() => _tab = "info"'>Thông tin</button>
-        <button class="@(_tab == "sub" ? "on" : "")" @onclick='() => _tab = "sub"'>Công việc con (@_children.Count)</button>
+        <button class="@(_tab == "sub" ? "on" : "")" @onclick='() => _tab = "sub"'>Công việc con (@_tree.Count)</button>
         <button class="@(_tab == "dep" ? "on" : "")" @onclick='() => _tab = "dep"'>Phụ thuộc (@_deps.Count)</button>
         <button class="@(_tab == "doc" ? "on" : "")" @onclick='() => _tab = "doc"'>Hồ sơ (@_files.Count)</button>
         <button class="@(_tab == "his" ? "on" : "")" @onclick='() => _tab = "his"'>Trao đổi, lịch sử</button>
@@ -79,7 +79,8 @@ else
                 <div class="card">
                     <div class="muted">Tiến độ</div>
                     <div class="row"><div class="progress" style="flex:1;height:8px"><div style="width:@(_t.Progress)%"></div></div><b>@_t.Progress%</b></div>
-                    @if (_children.Count > 0) { <div class="small muted">Tính tự động từ @_children.Count công việc con (có trọng số).</div> }
+                    @{ var direct = _tree.Count(x => x.Level == 1); }
+                    @if (direct > 0) { <div class="small muted">Tính tự động từ @direct công việc con trực tiếp (có trọng số; tiến độ các cấp dưới được dồn lên).</div> }
                     <table class="data mt">
                         <tbody>
                             @Row("Tình trạng hồ sơ", Labels.Of(_t.DocumentStatus))
@@ -100,15 +101,25 @@ else
                 <div class="card-head">
                     <h2>Công việc con</h2>
                     <span class="spacer"></span>
-                    @if (_t.ParentId == null) { <button class="btn primary sm" @onclick="() => OpenEditor(parentId: _t.Id, due: _t.DueAt)"><Icon Name="plus" Class="sm" />Thêm công việc con</button> }
+                    @if (CanAddChild(0)) { <button class="btn primary sm" @onclick="() => OpenEditor(parentId: _t.Id, due: _t.DueAt)"><Icon Name="plus" Class="sm" />Thêm công việc con</button> }
                 </div>
-                @if (_t.ParentId != null) { <div class="muted">Đây là công việc con của <a href="/tasks/@_t.ParentId">@_parent?.Code</a>. Chỉ hỗ trợ một cấp công việc con.</div> }
-                else if (_children.Count == 0) { <div class="empty">Chưa có công việc con. Chia công việc lớn thành các bước, mỗi bước có hạn, trạng thái và người phụ trách riêng.</div> }
-                @foreach (var c in _children)
+                @if (_ancestors.Count > 0)
                 {
-                    <TaskCard Item="c" ShowReasons="false">
-                        <div class="small muted mt-s">Trọng số @c.Weight.ToString("0.##") · Tiến độ @c.Progress% @(string.IsNullOrEmpty(c.Assignee) ? "" : "· Phụ trách: " + c.Assignee)</div>
-                    </TaskCard>
+                    <div class="muted mb-s">Đây là công việc @LevelName(_ancestors.Count) của <a href="/tasks/@_ancestors[^1].Id">@_ancestors[^1].Code</a>.
+                        @(CanAddChild(0) ? "" : $"Đã ở cấp sâu nhất (tối đa {TaskService.MaxSubtaskDepth} cấp công việc con).")</div>
+                }
+                @if (_tree.Count == 0 && CanAddChild(0)) { <div class="empty">Chưa có công việc con. Chia công việc lớn thành các bước (tối đa @TaskService.MaxSubtaskDepth cấp: con, cháu, chắt), mỗi bước có hạn, trạng thái và người phụ trách riêng.</div> }
+                @foreach (var (c, level) in _tree)
+                {
+                    <div class="subtask-level" style="margin-left:@Ui.Px((level - 1) * 24)">
+                        <TaskCard Item="c" ShowReasons="false">
+                            <div class="row small muted mt-s">
+                                <span class="badge b-gray">@LevelName(_ancestors.Count + level)</span>
+                                <span class="spacer">Trọng số @c.Weight.ToString("0.##") · Tiến độ @c.Progress% @(string.IsNullOrEmpty(c.Assignee) ? "" : "· Phụ trách: " + c.Assignee)</span>
+                                @if (CanAddChild(level)) { <button class="btn sm ghost" @onclick="() => OpenEditor(parentId: c.Id, due: c.DueAt)" title="Thêm công việc con cho @c.Code"><Icon Name="plus" Class="sm" />Việc con</button> }
+                            </div>
+                        </TaskCard>
+                    </div>
                 }
             </div>
             break;
@@ -167,10 +178,12 @@ else
 
 @code {
     [Parameter] public int Id { get; set; }
-    private WorkTask? _t, _parent;
+    private WorkTask? _t;
+    private List<WorkTask> _ancestors = new();
+    private List<(WorkTask Task, int Level)> _tree = new();
     private Project? _project;
     private PriorityAssessment? _assessment;
-    private List<WorkTask> _children = new(), _depResults = new();
+    private List<WorkTask> _depResults = new();
     private List<TaskService.DependencyInfo> _deps = new();
     private List<TaskHistory> _history = new();
     private List<Attachment> _files = new();
@@ -191,13 +204,24 @@ else
         var o = open.FirstOrDefault(x => x.Id == Id);
         if (o != null) { _t.DependsOnIds = o.DependsOnIds; _t.BlockedBy = o.BlockedBy; }
         _assessment = new PriorityEngine(Settings.Current).Assess(_t, Now);
-        _parent = _t.ParentId.HasValue ? await Tasks.GetAsync(_t.ParentId.Value) : null;
+        _ancestors = _t.ParentId.HasValue ? await Tasks.GetAncestorsAsync(Id) : new();
         _project = _t.ProjectId.HasValue ? await Projects.GetAsync(_t.ProjectId.Value) : null;
-        _children = await Tasks.GetChildrenAsync(Id);
+        _tree = await Tasks.GetSubtaskTreeAsync(Id);
         _deps = await Tasks.GetDependenciesAsync(Id);
         _history = await Tasks.GetHistoryAsync(Id);
         _files = await Attachments.GetForTaskAsync(Id);
     }
+
+    /// <summary>Còn thêm được công việc con dưới một nút của cây (level 0 = chính công việc đang xem).</summary>
+    private bool CanAddChild(int level) => _ancestors.Count + level < TaskService.MaxSubtaskDepth;
+
+    private static string LevelName(int depth) => depth switch
+    {
+        1 => "con",
+        2 => "cháu (cấp 2)",
+        3 => "chắt (cấp 3)",
+        _ => $"cấp {depth}"
+    };
 
     private static RenderFragment Row(string label, string? value) => __builder =>
     {

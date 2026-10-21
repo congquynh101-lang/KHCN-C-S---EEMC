@@ -10,9 +10,9 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="favicon.png" />
     <link rel="apple-touch-icon" href="apple-touch-icon.png" />
-    <link rel="stylesheet" href="app.css" />
-    <link rel="stylesheet" href="EEMC.WM.Web.styles.css" />
-    <script src="app.js"></script>
+    <link rel="stylesheet" href="@Versioned("app.css")" />
+    <link rel="stylesheet" href="@Versioned("EEMC.WM.Web.styles.css")" />
+    <script src="@Versioned("app.js")"></script>
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 
@@ -31,8 +31,17 @@
 
 </html>
 
+@inject IWebHostEnvironment Env
+
 @code {
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Gắn dấu phiên bản theo thời điểm sửa tệp để trình duyệt tải lại CSS/JS sau mỗi lần cập nhật
+    private string Versioned(string path)
+    {
+        var f = Env.WebRootFileProvider.GetFileInfo(path);
+        return f.Exists ? $"{path}?v={f.LastModified.UtcTicks:x}" : path;
+    }
 
     // Trang đăng nhập/tạo tài khoản chạy dạng tĩnh (để ghi cookie); các trang còn lại tương tác qua máy chủ
     private IComponentRenderMode? PageRenderMode =>

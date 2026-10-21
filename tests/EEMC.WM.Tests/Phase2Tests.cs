@@ -69,7 +69,51 @@ public sealed class Phase2Tests : IAsyncLifetime
         var p = (await _tasks.GetAsync(parent.Id))!;
         Assert.Equal(100, p.Progress);
         Assert.Equal(WorkTaskStatus.NotStarted, p.Status); // phải do người dùng xác nhận
-        await Assert.ThrowsAsync<ValidationException>(() => _tasks.CreateSubtaskAsync(a.Id, New("Cấp 3")));
+    }
+
+    [Fact]
+    public async Task Subtasks_nest_three_levels_progress_rolls_up_and_cycles_are_blocked()
+    {
+        var root = await _tasks.CreateAsync(New("Đề tài kháng điện 500 kV", 24 * 90));
+        var con = await _tasks.CreateSubtaskAsync(root.Id, New("Thiết kế"));
+        var conKhac = await _tasks.CreateSubtaskAsync(root.Id, New("Chế tạo thử"));
+        var chau = await _tasks.CreateSubtaskAsync(con.Id, New("Tính toán điện từ"));
+        var chat = await _tasks.CreateSubtaskAsync(chau.Id, New("Mô phỏng từ trường"));
+        var chat2 = await _tasks.CreateSubtaskAsync(chau.Id, New("Kiểm tra nhiệt"));
+
+        // Cấp thứ 4 bị từ chối
+        await Assert.ThrowsAsync<ValidationException>(() => _tasks.CreateSubtaskAsync(chat.Id, New("Cấp 4")));
+
+        // Tiến độ dồn từ chắt lên tận gốc
+        await _tasks.ChangeStatusAsync(chat.Id, WorkTaskStatus.Completed);
+        Assert.Equal(50, (await _tasks.GetAsync(chau.Id))!.Progress);
+        Assert.Equal(50, (await _tasks.GetAsync(con.Id))!.Progress);
+        Assert.Equal(25, (await _tasks.GetAsync(root.Id))!.Progress);
+        await _tasks.ChangeStatusAsync(chat2.Id, WorkTaskStatus.Completed);
+        Assert.Equal(50, (await _tasks.GetAsync(root.Id))!.Progress);
+        Assert.Equal(WorkTaskStatus.NotStarted, (await _tasks.GetAsync(root.Id))!.Status);
+
+        // Cây và chuỗi cấp trên
+        var tree = await _tasks.GetSubtaskTreeAsync(root.Id);
+        Assert.Equal(5, tree.Count);
+        Assert.Equal((con.Id, 1), (tree[0].Task.Id, tree[0].Level));
+        Assert.Equal((chau.Id, 2), (tree[1].Task.Id, tree[1].Level));
+        Assert.Equal(3, tree.Single(x => x.Task.Id == chat.Id).Level);
+        Assert.Equal(new[] { root.Id, con.Id, chau.Id }, (await _tasks.GetAncestorsAsync(chat.Id)).Select(t => t.Id));
+
+        // Không cho chọn cháu của chính mình làm cha (vòng lặp)
+        var c = (await _tasks.GetAsync(con.Id))!;
+        c.ParentId = chau.Id;
+        await Assert.ThrowsAsync<ValidationException>(() => _tasks.UpdateAsync(c));
+        // Chuyển nhánh 2 cấp (cháu + chắt) sang dưới công việc con khác: vẫn trong 3 cấp
+        var h = (await _tasks.GetAsync(chau.Id))!;
+        h.ParentId = conKhac.Id;
+        await _tasks.UpdateAsync(h);
+        // Nhưng không được chuyển cả nhánh đó xuống dưới cháu khác (sẽ thành 4 cấp)
+        var sau = await _tasks.CreateSubtaskAsync(con.Id, New("Bản vẽ"));
+        var h2 = (await _tasks.GetAsync(chau.Id))!;
+        h2.ParentId = sau.Id;
+        await Assert.ThrowsAsync<ValidationException>(() => _tasks.UpdateAsync(h2));
     }
 
     // ---------------------------------------------------------------- Phụ thuộc
