@@ -46,6 +46,7 @@ builder.Services.AddSingleton<BackupService>();
 builder.Services.AddSingleton<ExcelExportService>();
 builder.Services.AddSingleton<ProjectService>();
 builder.Services.AddSingleton<AttachmentService>();
+builder.Services.AddSingleton<LegalService>();
 builder.Services.AddSingleton<UserService>();
 builder.Services.AddSingleton<ReportService>();
 builder.Services.AddSingleton<DeviceIdentity>();
@@ -142,6 +143,17 @@ app.MapGet("/files/{id:int}", async (int id, bool? inline, AttachmentService svc
     if (full == null || !File.Exists(full)) return Results.NotFound();
     var stream = File.OpenRead(full);
     return Results.File(stream, AttachmentService.ContentType(a.Name), inline == true ? null : a.Name, enableRangeProcessing: true);
+});
+
+// Tệp gốc văn bản pháp luật (đã đăng nhập)
+app.MapGet("/legal-files/{id:int}", async (int id, bool? inline, LegalService svc) =>
+{
+    var d = await svc.GetAsync(id);
+    if (d?.StoredFile == null) return Results.NotFound();
+    var full = svc.ResolveStoredPath(d.StoredFile);
+    if (full == null || !File.Exists(full)) return Results.NotFound();
+    var name = d.FileName ?? Path.GetFileName(full);
+    return Results.File(File.OpenRead(full), AttachmentService.ContentType(name), inline == true ? null : name, enableRangeProcessing: true);
 });
 
 // Tải bản sao lưu (đã đăng nhập)

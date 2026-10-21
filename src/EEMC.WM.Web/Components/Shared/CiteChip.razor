@@ -1,0 +1,14 @@
+@* Điều khoản căn cứ của một ý trong bản rút gọn; bấm để mở đúng điều trong toàn văn *@
+@if (string.IsNullOrWhiteSpace(Citation))
+{
+    <span class="tertiary small">—</span>
+}
+else
+{
+    <button class="cite" title="Mở trong toàn văn" @onclick="() => OnOpen.InvokeAsync(Citation)">@Citation</button>
+}
+
+@code {
+    [Parameter] public string? Citation { get; set; }
+    [Parameter] public EventCallback<string?> OnOpen { get; set; }
+}

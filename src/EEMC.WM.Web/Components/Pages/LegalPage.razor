@@ -1,0 +1,707 @@
+@page "/legal"
+@page "/legal/{Id:int}"
+@inherits LivePage
+@inject LegalService Legal
+@inject IJSRuntime JS
+
+<PageTitle>@(_doc == null ? "Văn bản pháp luật" : _doc.Number ?? "Văn bản") – KHCN&amp;CĐS EEMC</PageTitle>
+
+<div class="page-head">
+    <div style="flex:1 1 320px;min-width:0">
+        <h1>Văn bản pháp luật</h1>
+        <div class="muted">Toàn văn, bản rút gọn có duyệt và đồ họa hiệu lực của các văn bản liên quan công tác KH&amp;CN, chuyển đổi số.</div>
+    </div>
+    <a class="btn primary" href="/legal/new"><Icon Name="plus" Class="sm" />Thêm văn bản</a>
+</div>
+
+<div class="legal-shell">
+    @* ---------------------------------------------------------------- Danh sách *@
+    <section class="legal-list">
+        <div class="search" style="max-width:none">
+            <Icon Name="search" Class="sm" />
+            <input class="input" placeholder="Số hiệu, tên, nội dung điều khoản..." @bind="_q" @bind:event="oninput" @bind:after="ReloadListAsync" />
+        </div>
+        <div class="chips">
+            <button class="chip @(_filter == null ? "on" : "")" @onclick="() => SetFilter(null)">Tất cả (@_counts.Values.Sum())</button>
+            @foreach (var e in FilterOrder.Where(e => e != LegalEffect.Unknown || _counts.ContainsKey(e)))
+            {
+                var eff = e;
+                <button class="chip @(_filter == eff ? "on" : "")" @onclick="() => SetFilter(eff)">@Labels.Of(eff) (@_counts.GetValueOrDefault(eff))</button>
+            }
+        </div>
+        @if (_list.Count == 0)
+        {
+            <div class="card empty">
+                @if (_counts.Count == 0) { <span>Chưa có văn bản nào. Bấm "Thêm văn bản" để nhập văn bản đầu tiên.</span> }
+                else { <span>Không có văn bản phù hợp.</span> }
+            </div>
+        }
+        @foreach (var d in _list)
+        {
+            <button class="legal-item @(d.Id == Id ? "on" : "")" @onclick='() => Nav.NavigateTo($"/legal/{d.Id}")'>
+                <span class="row" style="gap:6px">
+                    <span class="badge b-blue">@Labels.Of(d.DocType)</span>
+                    <span class="badge b-@Ui.EffectColor(d.Effect)">@Labels.Of(d.Effect)</span>
+                    @if (!string.IsNullOrEmpty(d.Number)) { <span class="small muted">@d.Number</span> }
+                </span>
+                <span class="t">@d.Title</span>
+                <span class="small muted">@ListMeta(d)</span>
+            </button>
+        }
+    </section>
+
+    @* ---------------------------------------------------------------- Chi tiết *@
+    <section style="min-width:0">
+        @if (Id == 0 || _doc == null)
+        {
+            @if (Id != 0 && !Loading) { <div class="card mb">Không tìm thấy văn bản (có thể đã bị xóa).</div> }
+            <div class="card mb">
+                <div class="card-head"><h2>Sắp có hiệu lực / hết hiệu lực trong 30 ngày</h2></div>
+                @if (_upcoming.Count == 0) { <div class="empty">Không có văn bản nào.</div> }
+                @foreach (var u in _upcoming)
+                {
+                    <div class="timeline-item">
+                        <span class="badge b-@Ui.EffectColor(u.Effect)">@Labels.Of(u.Effect)</span>
+                        <a href="/legal/@u.Id" class="spacer">@u.ShortName</a>
+                        @if (u.EffectiveDate >= Now.Date) { <span class="nowrap">Có hiệu lực @Ui.D(u.EffectiveDate)</span> }
+                        else { <span class="nowrap c-red">Hết hiệu lực @Ui.D(u.ExpiryDate)</span> }
+                    </div>
+                }
+            </div>
+            <div class="card">
+                <h2>Cách dùng</h2>
+                <div class="timeline-item"><span class="num">1</span><div><b>Thêm văn bản</b><div class="muted">Tải tệp PDF có lớp chữ/DOCX hoặc dán toàn văn; phần mềm tách mục lục Chương, Mục, Điều.</div></div></div>
+                <div class="timeline-item"><span class="num">2</span><div><b>Lập bản rút gọn</b><div class="muted">Người lập viết theo mẫu; mỗi ý bắt buộc ghi điều khoản căn cứ.</div></div></div>
+                <div class="timeline-item"><span class="num">3</span><div><b>Duyệt</b><div class="muted">Tài khoản quản trị đối chiếu toàn văn rồi duyệt. Chưa duyệt thì hiển thị nhãn cảnh báo.</div></div></div>
+                <div class="timeline-item"><span class="num">4</span><div><b>Đồ họa</b><div class="muted">Dòng thời gian hiệu lực, sơ đồ quan hệ, cấu trúc văn bản và trình tự thủ tục tự dựng từ dữ liệu đã nhập.</div></div></div>
+                <div class="muted small mt">Tình trạng hiệu lực do người nhập ghi theo nguồn chính thức; phần mềm không tự khẳng định.</div>
+            </div>
+        }
+        else
+        {
+            var d = _doc;
+            <div class="card mb">
+                <div class="row" style="gap:6px">
+                    <span class="badge b-blue">@Labels.Of(d.DocType)</span>
+                    <span class="badge b-@Ui.EffectColor(d.Effect)">@Labels.Of(d.Effect)</span>
+                    @foreach (var tag in Tags(d)) { <span class="badge b-gray">@tag</span> }
+                    <span class="spacer"></span>
+                    <a class="btn sm" href="/legal/@d.Id/edit"><Icon Name="edit" Class="sm" />Sửa</a>
+                    <button class="btn sm ghost danger icon-only" title="Xóa văn bản" @onclick="DeleteAsync"><Icon Name="trash" Class="sm" /></button>
+                </div>
+                <h2 style="font-size:19px;margin:10px 0">@d.Title</h2>
+                <div class="legal-meta">
+                    <div><span class="muted">Số hiệu</span><b>@(d.Number ?? "—")</b></div>
+                    <div><span class="muted">Cơ quan ban hành</span><b>@(d.Issuer ?? "—")</b></div>
+                    <div><span class="muted">Ngày ban hành</span><b>@(d.IssuedDate.HasValue ? Ui.D(d.IssuedDate) : "—")</b></div>
+                    <div><span class="muted">Ngày có hiệu lực</span><b>@(d.EffectiveDate.HasValue ? Ui.D(d.EffectiveDate) : "—")</b></div>
+                </div>
+                <div class="row small mt" style="gap:8px">
+                    <span class="muted">Tình trạng hiệu lực kiểm tra ngày @(d.EffectCheckedAt.HasValue ? Ui.D(d.EffectCheckedAt) : "—")</span>
+                    <button class="btn sm ghost" @onclick="MarkCheckedAsync" title="Ghi nhận đã đối chiếu tình trạng hiệu lực với nguồn chính thức hôm nay">Đã kiểm tra hôm nay</button>
+                    <span class="spacer"></span>
+                    @if (!string.IsNullOrEmpty(d.SourceUrl)) { <a href="@d.SourceUrl" target="_blank" rel="noopener"><Icon Name="link" Class="sm" /> Nguồn chính thức</a> }
+                    @if (d.StoredFile != null)
+                    {
+                        <a class="btn sm" href="/legal-files/@d.Id?inline=true" target="_blank"><Icon Name="file" Class="sm" />Xem bản gốc</a>
+                        <a class="btn sm ghost icon-only" href="/legal-files/@d.Id" title="Tải bản gốc @d.FileName"><Icon Name="download" Class="sm" /></a>
+                    }
+                </div>
+                <div class="row small mt-s" style="gap:6px">
+                    <span class="muted">Công việc liên quan:</span>
+                    @if (_tasks.Count == 0) { <span class="tertiary">chưa có</span> }
+                    @foreach (var t in _tasks)
+                    {
+                        <span class="badge b-@Ui.StatusColor(t.Status)" title="@t.Title">
+                            <a href="/tasks/@t.Id" style="color:inherit">@t.Code</a>
+                            <button class="btn ghost icon-only" style="height:16px;width:16px;padding:0;color:inherit" title="Bỏ gắn" @onclick="() => UnlinkAsync(t)"><Icon Name="close" Class="sm" /></button>
+                        </span>
+                    }
+                    <button class="btn sm ghost" @onclick="() => _linking = !_linking"><Icon Name="link" Class="sm" />Gắn với công việc</button>
+                </div>
+                @if (_linking)
+                {
+                    <div class="mt-s" style="max-width:520px">
+                        <input class="input" placeholder="Gõ mã hoặc tên công việc..." @bind="_taskQ" @bind:event="oninput" @bind:after="SearchTasksAsync" />
+                        @foreach (var t in _taskHits)
+                        {
+                            <div class="timeline-item">
+                                <span class="nowrap">@t.Code</span><span class="spacer ellipsis">@t.Title</span>
+                                <button class="btn sm" @onclick="() => LinkAsync(t)">Gắn</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @foreach (var w in _relations.Where(r => r.Incoming && r.Relation.Kind is LegalRelationKind.Amends or LegalRelationKind.Replaces or LegalRelationKind.Repeals))
+            {
+                <div class="banner warn">
+                    <Icon Name="warning" Class="sm" />
+                    <span class="spacer">
+                        @(w.Relation.Kind switch { LegalRelationKind.Amends => "Bị sửa đổi, bổ sung bởi", LegalRelationKind.Replaces => "Bị thay thế bởi", _ => "Bị bãi bỏ bởi" })
+                        <a href="/legal/@w.OtherId">@w.OtherName</a>@(w.OtherEffectiveDate.HasValue ? $" (hiệu lực {Ui.D(w.OtherEffectiveDate)})" : "").
+                        Kiểm tra lại tình trạng hiệu lực và bản rút gọn.
+                    </span>
+                </div>
+            }
+
+            <div class="tabs" role="tablist">
+                <button class="@(_tab == "full" ? "on" : "")" @onclick='() => SetTab("full")'>Toàn văn</button>
+                <button class="@(_tab == "short" ? "on" : "")" @onclick='() => SetTab("short")'>Rút gọn</button>
+                <button class="@(_tab == "graphic" ? "on" : "")" @onclick='() => SetTab("graphic")'>Đồ họa</button>
+            </div>
+
+            @if (_tab == "full")
+            {
+                @if (d.Sections.Count == 0)
+                {
+                    <div class="card empty">Chưa có toàn văn. <a href="/legal/@d.Id/edit">Sửa văn bản</a> để tải tệp hoặc dán toàn văn.</div>
+                }
+                else
+                {
+                    <div class="legal-full">
+                        <nav class="card toc" aria-label="Mục lục">
+                            <input class="input mb-s" placeholder="Tìm trong văn bản..." @bind="_ftq" @bind:event="oninput" />
+                            @foreach (var s in d.Sections.Where(s => s.Kind != LegalSectionKind.Article || Matches(s)))
+                            {
+                                var sec = s;
+                                <button class="@(s.Kind == LegalSectionKind.Article ? "" : "grp")" @onclick="() => ScrollToAsync(sec)">@LegalTextParser.Title(s)</button>
+                            }
+                        </nav>
+                        <article class="card law-text">
+                            <div class="row small muted mb-s">
+                                <span class="spacer">Toàn văn tách tự động từ văn bản nguồn; đánh số khoản, điểm giữ nguyên như bản gốc.</span>
+                                @if (!string.IsNullOrWhiteSpace(_ftq)) { <b>Đang lọc: @ShownArticles điều có "@_ftq"</b> }
+                            </div>
+                            @foreach (var s in d.Sections)
+                            {
+                                if (s.Kind == LegalSectionKind.Article && !Matches(s)) continue;
+                                var sec = s;
+                                <div id="sec-@s.SortOrder" class="@(s.SortOrder == _flash ? "flash" : "")">
+                                    @if (s.Kind == LegalSectionKind.Article)
+                                    {
+                                        <h4><span>@LegalTextParser.Title(s)</span><span class="spacer"></span><button class="btn sm ghost no-print" title="Sao chép trích dẫn" @onclick="() => CopyCiteAsync(sec)"><Icon Name="copy" Class="sm" /></button></h4>
+                                    }
+                                    else if (s.Kind == LegalSectionKind.Preamble)
+                                    {
+                                        <h4 class="muted">@s.Heading</h4>
+                                    }
+                                    else
+                                    {
+                                        <h3>@LegalTextParser.Title(s)</h3>
+                                    }
+                                    @foreach (var line in s.Body.Split('\n'))
+                                    {
+                                        <p class="i@(LegalTextParser.Indent(line))">@line</p>
+                                    }
+                                </div>
+                            }
+                        </article>
+                    </div>
+                }
+            }
+            else if (_tab == "short")
+            {
+                @if (_editSummary)
+                {
+                    <div class="card">
+                        <div class="card-head"><h2>Lập / sửa bản rút gọn</h2></div>
+                        <div class="muted mb">Viết ngắn gọn bằng lời của người lập. Mỗi điểm chính và việc cần làm phải ghi điều khoản căn cứ (ví dụ "Điều 5, khoản 1"). Lưu xong bản rút gọn trở về trạng thái "Chưa duyệt".</div>
+                        <div class="grid grid-2">
+                            <label class="field"><span>Văn bản này nói về gì</span><textarea class="input" rows="4" @bind="_about"></textarea></label>
+                            <label class="field"><span>Áp dụng với EEMC như thế nào</span><textarea class="input" rows="4" @bind="_applies"></textarea></label>
+                        </div>
+                        @foreach (var kind in new[] { LegalPointKind.KeyPoint, LegalPointKind.Duty, LegalPointKind.Step })
+                        {
+                            var k = kind;
+                            <h3 class="mt">@PointHeading(k)</h3>
+                            @foreach (var p in _draft.Where(p => p.Kind == k))
+                            {
+                                var pt = p;
+                                <div class="row mb-s nowrap" style="align-items:flex-start">
+                                    <textarea class="input" rows="1" style="flex:1" placeholder="@PointPlaceholder(k)" @bind="pt.Text"></textarea>
+                                    <input class="input" style="width:170px" placeholder="@(k == LegalPointKind.Step ? "Căn cứ (nếu có)" : "Căn cứ *")" @bind="pt.Citation" />
+                                    @if (k == LegalPointKind.Duty) { <input class="input" style="width:170px" placeholder="Thời hạn" @bind="pt.Due" /> }
+                                    <button class="btn ghost icon-only danger" title="Bỏ dòng này" @onclick="() => _draft.Remove(pt)"><Icon Name="trash" Class="sm" /></button>
+                                </div>
+                            }
+                            <button class="btn sm" @onclick="() => _draft.Add(new LegalPoint { Kind = k })"><Icon Name="plus" Class="sm" />Thêm dòng</button>
+                        }
+                        @if (!string.IsNullOrEmpty(_summaryError)) { <div class="validation mt">@_summaryError</div> }
+                        <div class="dialog-foot">
+                            <button class="btn" @onclick="() => _editSummary = false">Hủy</button>
+                            <button class="btn primary" @onclick="SaveSummaryAsync">Lưu bản rút gọn</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="banner @(d.SummaryState == SummaryState.Approved ? "ok" : d.SummaryState == SummaryState.Draft ? "warn" : "info")">
+                        <b>Bản rút gọn: @Labels.Of(d.SummaryState)</b>
+                        <span class="spacer small">
+                            @if (d.SummaryState != SummaryState.None) { <text>Người lập @d.SummaryAuthor · @Ui.Dt(d.SummaryUpdatedAt)</text> }
+                            @if (d.SummaryState == SummaryState.Approved) { <text> · Duyệt bởi @d.SummaryApprovedBy · @Ui.Dt(d.SummaryApprovedAt)</text> }
+                            @if (d.SummaryState == SummaryState.Draft) { <text> · Chưa được duyệt: luôn đối chiếu toàn văn trước khi sử dụng.</text> }
+                        </span>
+                        <button class="btn sm" @onclick="StartEditSummary"><Icon Name="edit" Class="sm" />@(d.SummaryState == SummaryState.None ? "Lập bản rút gọn" : "Sửa bản rút gọn")</button>
+                        @if (_isAdmin && d.SummaryState == SummaryState.Draft) { <button class="btn sm primary" @onclick="ApproveAsync"><Icon Name="approve" Class="sm" />Duyệt</button> }
+                        @if (_isAdmin && d.SummaryState == SummaryState.Approved) { <button class="btn sm ghost" @onclick="RevokeAsync">Hủy duyệt</button> }
+                        @if (!_isAdmin && d.SummaryState == SummaryState.Draft) { <span class="small">Cần tài khoản quản trị để duyệt.</span> }
+                    </div>
+                    @if (d.SummaryState == SummaryState.None)
+                    {
+                        <div class="card empty">Chưa có bản rút gọn.</div>
+                    }
+                    else
+                    {
+                        <div class="grid grid-2 mb">
+                            <div class="card"><h2>Văn bản này nói về gì</h2><div style="white-space:pre-line">@(d.SummaryAbout ?? "—")</div></div>
+                            <div class="card"><h2>Áp dụng với EEMC như thế nào</h2><div style="white-space:pre-line">@(d.SummaryApplies ?? "—")</div></div>
+                        </div>
+                        <div class="card mb">
+                            <h2>Điểm chính cần biết</h2>
+                            @if (!d.Points.Any(p => p.Kind == LegalPointKind.KeyPoint)) { <div class="empty">Chưa có.</div> }
+                            @{ int n = 0; }
+                            @foreach (var p in d.Points.Where(p => p.Kind == LegalPointKind.KeyPoint))
+                            {
+                                n++;
+                                <div class="timeline-item" style="align-items:flex-start">
+                                    <span class="num">@n</span>
+                                    <span class="spacer" style="white-space:pre-line">@p.Text</span>
+                                    <CiteChip Citation="@p.Citation" OnOpen="OpenCitationAsync" />
+                                </div>
+                            }
+                        </div>
+                        <div class="card">
+                            <h2>Việc EEMC cần làm</h2>
+                            @if (!d.Points.Any(p => p.Kind == LegalPointKind.Duty)) { <div class="empty">Chưa có.</div> }
+                            else
+                            {
+                                <div class="table-wrap">
+                                    <table class="data">
+                                        <thead><tr><th>Việc cần làm</th><th>Căn cứ</th><th>Thời hạn</th><th>Công việc</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var p in d.Points.Where(p => p.Kind == LegalPointKind.Duty))
+                                            {
+                                                var pt = p;
+                                                var task = p.TaskId.HasValue ? _tasks.FirstOrDefault(t => t.Id == p.TaskId) : null;
+                                                <tr>
+                                                    <td class="title" style="white-space:pre-line">@p.Text</td>
+                                                    <td><CiteChip Citation="@p.Citation" OnOpen="OpenCitationAsync" /></td>
+                                                    <td>@(p.Due ?? "—")</td>
+                                                    <td class="nowrap">
+                                                        @if (task != null) { <a href="/tasks/@task.Id">@task.Code</a> <span class="badge b-@Ui.StatusColor(task.Status)">@Labels.Of(task.Status)</span> }
+                                                        else { <button class="btn sm" @onclick="() => CreateTask(pt)"><Icon Name="plus" Class="sm" />Tạo công việc</button> }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            }
+            else
+            {
+                <div class="row mb no-print">
+                    <span class="muted spacer">Đồ họa dựng từ ngày tháng, quan hệ và mục lục đã nhập; thông tin còn trống được ghi rõ là chưa có.</span>
+                    <button class="btn sm" @onclick="PrintAsync"><Icon Name="print" Class="sm" />In / Lưu PDF</button>
+                </div>
+
+                <div class="card mb">
+                    <h2>Dòng thời gian hiệu lực</h2>
+                    <div class="efftl">
+                        @{ var steps = Timeline(d); }
+                        @for (int i = 0; i < steps.Count; i++)
+                        {
+                            var st = steps[i];
+                            <div class="st @st.Css">
+                                <div class="ln"><span class="dot"></span>@if (i < steps.Count - 1) { <span class="bar"></span> }</div>
+                                <b class="small">@st.Title</b>
+                                <span class="small muted">@st.When</span>
+                                @if (st.LinkId.HasValue) { <a class="small" href="/legal/@st.LinkId">@st.LinkText</a> }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="card mb">
+                    <div class="card-head"><h2>Quan hệ với văn bản khác</h2><span class="spacer"></span><a class="btn sm no-print" href="/legal/@d.Id/edit#relations"><Icon Name="edit" Class="sm" />Khai báo quan hệ</a></div>
+                    @{
+                        var up = _relations.Where(r => (!r.Incoming && r.Relation.Kind is LegalRelationKind.BasedOn or LegalRelationKind.Guides)).ToList();
+                        var down = _relations.Where(r => (r.Incoming && r.Relation.Kind is LegalRelationKind.BasedOn or LegalRelationKind.Guides)).ToList();
+                        var changes = _relations.Where(r => r.Relation.Kind is LegalRelationKind.Amends or LegalRelationKind.Replaces or LegalRelationKind.Repeals).ToList();
+                    }
+                    @if (_relations.Count == 0)
+                    {
+                        <div class="empty">Chưa khai báo quan hệ với văn bản khác.</div>
+                    }
+                    else
+                    {
+                        <div class="reldia">
+                            <div class="col">
+                                <div class="small muted">Căn cứ / văn bản được hướng dẫn</div>
+                                @if (up.Count == 0) { <div class="box tertiary">Chưa có</div> }
+                                @foreach (var r in up) { <RelBox View="r" /> }
+                            </div>
+                            <div class="arrow">→</div>
+                            <div class="me"><div class="small c-blue">@Labels.Of(d.DocType) đang xem</div><b>@(d.Number ?? d.Title)</b></div>
+                            <div class="arrow">→</div>
+                            <div class="col">
+                                <div class="small muted">Văn bản hướng dẫn, triển khai</div>
+                                @if (down.Count == 0) { <div class="box tertiary">Chưa có</div> }
+                                @foreach (var r in down) { <RelBox View="r" /> }
+                            </div>
+                        </div>
+                        @if (changes.Count > 0)
+                        {
+                            <div class="row mt" style="gap:8px">
+                                @foreach (var r in changes)
+                                {
+                                    <span class="relchip @(r.Incoming ? "warn" : "")">
+                                        @ChangeLabel(r):
+                                        @if (r.OtherId.HasValue) { <a href="/legal/@r.OtherId">@r.OtherName</a> } else { @r.OtherName }
+                                    </span>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+
+                <div class="grid grid-2">
+                    <div class="card">
+                        <h2>Cấu trúc văn bản</h2>
+                        @{ var chapters = LegalTextParser.ArticlesPerChapter(d.Sections); var max = Math.Max(1, chapters.Select(c => c.Articles).DefaultIfEmpty(0).Max()); }
+                        @if (chapters.Count == 0) { <div class="empty">Chưa có toàn văn để dựng cấu trúc.</div> }
+                        else
+                        {
+                            <div class="muted small mb-s">@chapters.Count(c => c.Chapter != "Không thuộc chương") chương · @chapters.Sum(c => c.Articles) điều</div>
+                            @foreach (var c in chapters)
+                            {
+                                <div class="mb-s">
+                                    <div class="row small nowrap"><span class="spacer ellipsis" title="@c.Chapter">@c.Chapter</span><span class="muted">@c.Articles điều</span></div>
+                                    <div class="sbar"><div style="width:@Ui.Pc(c.Articles * 100.0 / max)"></div></div>
+                                </div>
+                            }
+                        }
+                    </div>
+                    <div class="card">
+                        <h2>Trình tự thủ tục</h2>
+                        @if (!d.Points.Any(p => p.Kind == LegalPointKind.Step)) { <div class="empty">Chưa nhập trình tự thủ tục (nhập ở mục "Sửa bản rút gọn" nếu văn bản có quy định).</div> }
+                        @{ int sn = 0; }
+                        @foreach (var p in d.Points.Where(p => p.Kind == LegalPointKind.Step))
+                        {
+                            sn++;
+                            <div class="timeline-item" style="align-items:flex-start">
+                                <span class="num sq">@sn</span>
+                                <div class="spacer"><div style="white-space:pre-line">@p.Text</div>@if (!string.IsNullOrEmpty(p.Citation)) { <CiteChip Citation="@p.Citation" OnOpen="OpenCitationAsync" /> }</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        }
+    </section>
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly LegalEffect[] FilterOrder = { LegalEffect.InEffect, LegalEffect.PartlyExpired, LegalEffect.NotYetEffective, LegalEffect.Expired, LegalEffect.Unknown };
+
+    private List<LegalDocument> _list = new(), _upcoming = new();
+    private Dictionary<LegalEffect, int> _counts = new();
+    private LegalEffect? _filter;
+    private string _q = "", _ftq = "", _taskQ = "", _tab = "full";
+    private LegalDocument? _doc;
+    private List<LegalRelationView> _relations = new();
+    private List<WorkTask> _tasks = new(), _taskHits = new();
+    private bool _isAdmin, _linking, _editSummary;
+    private string _userName = "";
+    private int _loadedId = -1, _flash = -1, _pendingScroll = -1;
+    private int ShownArticles => _doc?.Sections.Count(s => s.Kind == LegalSectionKind.Article && Matches(s)) ?? 0;
+    private string? _about, _applies, _summaryError;
+    private List<LegalPoint> _draft = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Legal.Changed += OnLegalChanged;
+        if (AuthState != null)
+        {
+            var user = (await AuthState).User;
+            _isAdmin = user.IsInRole("admin");
+            _userName = user.Identity?.Name ?? "";
+        }
+        _loadedId = Id;
+        if (TabQuery is "short" or "graphic") _tab = TabQuery;
+        await base.OnInitializedAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedId != Id)
+        {
+            _loadedId = Id;
+            _tab = TabQuery is "short" or "graphic" ? TabQuery : _tab;
+            _editSummary = _linking = false;
+            _ftq = "";
+            await SafeLoadAsync();
+        }
+    }
+
+    protected override async Task LoadAsync()
+    {
+        _counts = await Legal.CountByEffectAsync();
+        await ReloadListAsync();
+        if (Id == 0)
+        {
+            _doc = null;
+            _upcoming = await Legal.GetUpcomingAsync(30);
+            return;
+        }
+        _doc = await Legal.GetAsync(Id);
+        if (_doc == null) { _upcoming = await Legal.GetUpcomingAsync(30); return; }
+        _relations = await Legal.GetRelationsAsync(Id);
+        _tasks = await Legal.GetLinkedTasksAsync(Id);
+    }
+
+    private static string ListMeta(LegalDocument d)
+    {
+        var parts = new List<string> { d.Issuer ?? "—" };
+        if (d.EffectiveDate.HasValue) parts.Add($"Hiệu lực {Ui.D(d.EffectiveDate)}");
+        if (d.SummaryState != SummaryState.None) parts.Add($"Rút gọn: {Labels.Of(d.SummaryState).ToLowerInvariant()}");
+        return string.Join(" · ", parts);
+    }
+
+    private async Task ReloadListAsync() => _list = await Legal.SearchAsync(_q, _filter);
+
+    private async Task SetFilter(LegalEffect? e)
+    {
+        _filter = e;
+        await ReloadListAsync();
+    }
+
+    private void SetTab(string tab)
+    {
+        _tab = tab;
+        _editSummary = false;
+    }
+
+    private void OnLegalChanged(object? s, EventArgs e) => InvokeAsync(async () =>
+    {
+        if (_editSummary) return; // không làm mất nội dung đang soạn
+        await SafeLoadAsync();
+        StateHasChanged();
+    });
+
+    private static IEnumerable<string> Tags(LegalDocument d) =>
+        (d.Tags ?? "").Split(',', ';').Select(t => t.Trim()).Where(t => t.Length > 0);
+
+    // ---------------------------------------------------------------- Toàn văn
+
+    private bool Matches(LegalSection s)
+    {
+        if (string.IsNullOrWhiteSpace(_ftq)) return true;
+        var terms = TextNormalizer.Normalize(_ftq).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var hay = TextNormalizer.Normalize(s.Heading + " " + s.Body);
+        return terms.All(hay.Contains);
+    }
+
+    private async Task ScrollToAsync(LegalSection s)
+    {
+        _flash = s.SortOrder;
+        try { await JS.InvokeVoidAsync("eemc.scrollTo", $"sec-{s.SortOrder}"); } catch (JSDisconnectedException) { }
+    }
+
+    private async Task CopyCiteAsync(LegalSection s)
+    {
+        var d = _doc!;
+        var cite = $"Điều {s.Number} {Labels.Of(d.DocType)}{(string.IsNullOrEmpty(d.Number) ? $" {d.Title}" : $" số {d.Number}")}";
+        var ok = await JS.InvokeAsync<bool>("eemc.copyText", cite);
+        if (ok) UiSvc.Success($"Đã sao chép: {cite}"); else UiSvc.Show(cite);
+    }
+
+    /// <summary>Bấm vào căn cứ "Điều 5, khoản 1" → mở tab Toàn văn tại Điều 5.</summary>
+    private async Task OpenCitationAsync(string? citation)
+    {
+        var no = LegalTextParser.ArticleOf(citation);
+        var s = no == null ? null : _doc?.Sections.FirstOrDefault(x => x.Kind == LegalSectionKind.Article && x.Number.Equals(no, StringComparison.OrdinalIgnoreCase));
+        if (s == null) { UiSvc.Show($"Không tìm thấy \"{citation}\" trong toàn văn đã nhập."); return; }
+        _tab = "full";
+        _ftq = "";
+        _flash = s.SortOrder;
+        _pendingScroll = s.SortOrder; // cuộn sau khi tab Toàn văn đã hiển thị
+        await Task.CompletedTask;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingScroll < 0) return;
+        var target = _pendingScroll;
+        _pendingScroll = -1;
+        try { await JS.InvokeVoidAsync("eemc.scrollTo", $"sec-{target}"); } catch (JSDisconnectedException) { }
+    }
+
+    // ---------------------------------------------------------------- Rút gọn
+
+    private static string PointHeading(LegalPointKind k) => k switch
+    {
+        LegalPointKind.KeyPoint => "Điểm chính cần biết",
+        LegalPointKind.Duty => "Việc EEMC cần làm",
+        _ => "Trình tự thủ tục (nếu văn bản có quy định)"
+    };
+
+    private static string PointPlaceholder(LegalPointKind k) => k switch
+    {
+        LegalPointKind.KeyPoint => "Quy định quan trọng, điểm mới...",
+        LegalPointKind.Duty => "Việc EEMC phải thực hiện...",
+        _ => "Bước thực hiện..."
+    };
+
+    private void StartEditSummary()
+    {
+        var d = _doc!;
+        _about = d.SummaryAbout;
+        _applies = d.SummaryApplies;
+        _draft = d.Points.Select(p => new LegalPoint { Kind = p.Kind, Text = p.Text, Citation = p.Citation, Due = p.Due, TaskId = p.TaskId }).ToList();
+        foreach (var k in new[] { LegalPointKind.KeyPoint, LegalPointKind.Duty })
+            if (!_draft.Any(p => p.Kind == k)) _draft.Add(new LegalPoint { Kind = k });
+        _summaryError = null;
+        _editSummary = true;
+    }
+
+    private async Task SaveSummaryAsync()
+    {
+        _summaryError = null;
+        if (_doc!.SummaryState == SummaryState.Approved &&
+            !await UiSvc.ConfirmAsync("Bản rút gọn đang ở trạng thái ĐÃ DUYỆT.\nLưu thay đổi sẽ chuyển về \"Chưa duyệt\" và cần duyệt lại.", "Lưu")) return;
+        try
+        {
+            await Legal.SaveSummaryAsync(_doc.Id, _about, _applies, _draft, _userName);
+            _editSummary = false;
+            UiSvc.Success("Đã lưu bản rút gọn (chưa duyệt).");
+            await SafeLoadAsync();
+        }
+        catch (ValidationException ex) { _summaryError = string.Join("\n", ex.Errors); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được bản rút gọn"); }
+    }
+
+    private async Task ApproveAsync()
+    {
+        if (!await UiSvc.ConfirmAsync("Xác nhận đã đối chiếu bản rút gọn với toàn văn và DUYỆT?", "Duyệt")) return;
+        try
+        {
+            await Legal.ApproveSummaryAsync(_doc!.Id, _userName);
+            UiSvc.Success("Đã duyệt bản rút gọn.");
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không duyệt được"); }
+    }
+
+    private async Task RevokeAsync()
+    {
+        if (!await UiSvc.ConfirmAsync("Hủy duyệt bản rút gọn này?", "Hủy duyệt", danger: true)) return;
+        await Legal.RevokeApprovalAsync(_doc!.Id);
+    }
+
+    private void CreateTask(LegalPoint p)
+    {
+        var d = _doc!;
+        var notes = $"Căn cứ: {(string.IsNullOrEmpty(d.Number) ? d.Title : $"{Labels.Of(d.DocType)} số {d.Number}")}" +
+                    (string.IsNullOrEmpty(p.Citation) ? "" : $", {p.Citation}") +
+                    (string.IsNullOrEmpty(p.Due) ? "" : $"\nThời hạn theo văn bản: {p.Due}");
+        UiSvc.RequestEditor(new EditorRequest(null, Title: p.Text, Notes: notes,
+            OnCreated: async t => { await Legal.SetPointTaskAsync(p.Id, t.Id); }));
+    }
+
+    // ---------------------------------------------------------------- Công việc liên quan, kiểm tra hiệu lực
+
+    private async Task SearchTasksAsync()
+    {
+        _taskHits = string.IsNullOrWhiteSpace(_taskQ) ? new()
+            : (await Tasks.QueryAllAsync(new TaskQuery { StatusFilter = StatusFilter.All, Search = _taskQ }))
+                .Where(t => _tasks.All(x => x.Id != t.Id)).Take(8).ToList();
+    }
+
+    private async Task LinkAsync(WorkTask t)
+    {
+        try
+        {
+            await Legal.LinkTaskAsync(_doc!.Id, t.Id);
+            _taskQ = "";
+            _taskHits.Clear();
+            _linking = false;
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không gắn được công việc"); }
+    }
+
+    private async Task UnlinkAsync(WorkTask t)
+    {
+        if (!await UiSvc.ConfirmAsync($"Bỏ gắn công việc {t.Code} khỏi văn bản?", "Bỏ gắn")) return;
+        await Legal.UnlinkTaskAsync(_doc!.Id, t.Id);
+    }
+
+    private async Task MarkCheckedAsync()
+    {
+        await Legal.MarkEffectCheckedAsync(_doc!.Id);
+        UiSvc.Success("Đã ghi nhận ngày kiểm tra tình trạng hiệu lực.");
+    }
+
+    private async Task DeleteAsync()
+    {
+        var d = _doc!;
+        if (!await UiSvc.ConfirmAsync($"Xóa văn bản \"{d.ShortName}\"?\nToàn văn, bản rút gọn và tệp gốc sẽ bị xóa; công việc đã gắn vẫn giữ nguyên.", "Xóa", danger: true)) return;
+        await Legal.DeleteAsync(d.Id);
+        Nav.NavigateTo("/legal");
+    }
+
+    // ---------------------------------------------------------------- Đồ họa
+
+    private sealed record TimelineStep(string Title, string When, string Css, int? LinkId = null, string? LinkText = null);
+
+    private List<TimelineStep> Timeline(LegalDocument d)
+    {
+        var today = Now.Date;
+        string Css(DateTime? date) => date == null ? "unknown" : date <= today ? "past" : "future";
+        string When(DateTime? date) => date.HasValue ? Ui.D(date) : "Chưa có thông tin";
+        var list = new List<TimelineStep>
+        {
+            new("Ban hành", When(d.IssuedDate), Css(d.IssuedDate)),
+            new("Có hiệu lực", When(d.EffectiveDate), Css(d.EffectiveDate))
+        };
+        foreach (var r in _relations.Where(r => r.Incoming && r.Relation.Kind == LegalRelationKind.Amends).OrderBy(r => r.OtherEffectiveDate ?? DateTime.MaxValue))
+            list.Add(new("Sửa đổi, bổ sung", When(r.OtherEffectiveDate), "amend", r.OtherId, r.OtherName));
+        var ender = _relations.FirstOrDefault(r => r.Incoming && r.Relation.Kind is LegalRelationKind.Replaces or LegalRelationKind.Repeals);
+        if (d.ExpiryDate.HasValue || d.Effect == LegalEffect.Expired)
+            list.Add(new("Hết hiệu lực", When(d.ExpiryDate), d.ExpiryDate <= today || d.Effect == LegalEffect.Expired ? "end" : "future", ender?.OtherId, ender?.OtherName));
+        else
+            list.Add(new("Hết hiệu lực", ender != null ? $"{ChangeLabel(ender)} (chưa nhập ngày)" : "Chưa có thông tin", "unknown", ender?.OtherId, ender?.OtherName));
+        return list;
+    }
+
+    private static string ChangeLabel(LegalRelationView r) => (r.Relation.Kind, r.Incoming) switch
+    {
+        (LegalRelationKind.Amends, true) => "Bị sửa đổi, bổ sung bởi",
+        (LegalRelationKind.Replaces, true) => "Bị thay thế bởi",
+        (LegalRelationKind.Repeals, true) => "Bị bãi bỏ bởi",
+        (LegalRelationKind.Amends, false) => "Sửa đổi, bổ sung",
+        (LegalRelationKind.Replaces, false) => "Thay thế cho",
+        (LegalRelationKind.Repeals, false) => "Bãi bỏ",
+        _ => Labels.Of(r.Relation.Kind)
+    };
+
+    private async Task PrintAsync()
+    {
+        try { await JS.InvokeVoidAsync("eemc.print"); } catch (JSDisconnectedException) { }
+    }
+
+    public override void Dispose()
+    {
+        Legal.Changed -= OnLegalChanged;
+        base.Dispose();
+    }
+}

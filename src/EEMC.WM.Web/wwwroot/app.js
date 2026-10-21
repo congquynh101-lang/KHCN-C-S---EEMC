@@ -35,6 +35,14 @@ window.eemc = {
         const el = document.getElementById(id);
         if (el) el.focus();
     },
+    scrollTo: function (id) {
+        const el = document.getElementById(id);
+        if (el) el.scrollIntoView({ block: 'start' });
+    },
+    copyText: async function (text) {
+        try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+    },
+    print: function () { window.print(); },
     // Phím tắt toàn cục: N = thêm công việc, / = tìm kiếm
     registerShortcuts: function (dotnet) {
         if (window.__eemcShortcuts) return;

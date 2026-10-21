@@ -88,6 +88,44 @@ public static class Labels
         _ => "Tài liệu khác"
     };
 
+    public static string Of(LegalDocType t) => t switch
+    {
+        LegalDocType.Law => "Luật",
+        LegalDocType.Resolution => "Nghị quyết",
+        LegalDocType.Decree => "Nghị định",
+        LegalDocType.Decision => "Quyết định",
+        LegalDocType.Circular => "Thông tư",
+        LegalDocType.Internal => "Quy chế nội bộ",
+        LegalDocType.Standard => "Tiêu chuẩn/Quy chuẩn",
+        _ => "Văn bản khác"
+    };
+
+    public static string Of(LegalEffect e) => e switch
+    {
+        LegalEffect.InEffect => "Còn hiệu lực",
+        LegalEffect.PartlyExpired => "Hết hiệu lực một phần",
+        LegalEffect.Expired => "Hết hiệu lực",
+        LegalEffect.NotYetEffective => "Chưa có hiệu lực",
+        _ => "Chưa xác định"
+    };
+
+    public static string Of(SummaryState s) => s switch
+    {
+        SummaryState.Draft => "Chưa duyệt",
+        SummaryState.Approved => "Đã duyệt",
+        _ => "Chưa lập"
+    };
+
+    public static string Of(LegalRelationKind k) => k switch
+    {
+        LegalRelationKind.BasedOn => "Căn cứ",
+        LegalRelationKind.Guides => "Hướng dẫn thi hành",
+        LegalRelationKind.Amends => "Sửa đổi, bổ sung",
+        LegalRelationKind.Replaces => "Thay thế",
+        LegalRelationKind.Repeals => "Bãi bỏ",
+        _ => k.ToString()
+    };
+
     /// <summary>"Còn 2 ngày 3 giờ", "Quá hạn 5 giờ", "Còn 45 phút".</summary>
     public static string TimeRemaining(DateTime due, DateTime now)
     {

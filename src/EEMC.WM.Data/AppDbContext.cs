@@ -22,6 +22,11 @@ public class AppDbContext : DbContext
     public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<TaskDependency> TaskDependencies => Set<TaskDependency>();
     public DbSet<AppUser> Users => Set<AppUser>();
+    public DbSet<LegalDocument> LegalDocuments => Set<LegalDocument>();
+    public DbSet<LegalSection> LegalSections => Set<LegalSection>();
+    public DbSet<LegalPoint> LegalPoints => Set<LegalPoint>();
+    public DbSet<LegalRelation> LegalRelations => Set<LegalRelation>();
+    public DbSet<LegalTaskLink> LegalTaskLinks => Set<LegalTaskLink>();
 
     /// <summary>Mã máy hiện tại (đặt khi khởi động), ghi vào công việc mới tạo.</summary>
     public static string? CurrentDeviceId { get; set; }
@@ -196,6 +201,60 @@ public class AppDbContext : DbContext
             e.ToTable("Users");
             e.Property(x => x.UserName).IsRequired().HasMaxLength(100);
             e.HasIndex(x => x.UserName).IsUnique();
+        });
+
+        // ---------------- Văn bản pháp luật
+        b.Entity<LegalDocument>(e =>
+        {
+            e.ToTable("LegalDocuments");
+            e.Property(x => x.Number).HasMaxLength(100);
+            e.Property(x => x.Title).IsRequired().HasMaxLength(1000);
+            e.Property(x => x.Issuer).HasMaxLength(300);
+            e.Property(x => x.Tags).HasMaxLength(500);
+            e.Property(x => x.SourceUrl).HasMaxLength(2000);
+            e.Property(x => x.StoredFile).HasMaxLength(300);
+            e.Property(x => x.FileName).HasMaxLength(300);
+            e.Property(x => x.SummaryAuthor).HasMaxLength(200);
+            e.Property(x => x.SummaryApprovedBy).HasMaxLength(200);
+            e.Ignore(x => x.ShortName);
+            e.HasMany(x => x.Sections).WithOne().HasForeignKey(s => s.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Points).WithOne().HasForeignKey(p => p.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => x.Effect);
+            e.HasIndex(x => x.Number);
+        });
+
+        b.Entity<LegalSection>(e =>
+        {
+            e.ToTable("LegalSections");
+            e.Property(x => x.Number).HasMaxLength(20);
+            e.Property(x => x.Heading).HasMaxLength(1000);
+            e.HasIndex(x => new { x.DocumentId, x.SortOrder });
+        });
+
+        b.Entity<LegalPoint>(e =>
+        {
+            e.ToTable("LegalPoints");
+            e.Property(x => x.Text).IsRequired().HasMaxLength(4000);
+            e.Property(x => x.Citation).HasMaxLength(300);
+            e.Property(x => x.Due).HasMaxLength(300);
+            e.HasIndex(x => new { x.DocumentId, x.Kind, x.SortOrder });
+        });
+
+        b.Entity<LegalRelation>(e =>
+        {
+            e.ToTable("LegalRelations");
+            e.Property(x => x.TargetText).HasMaxLength(1000);
+            e.HasOne<LegalDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<LegalDocument>().WithMany().HasForeignKey(x => x.TargetId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(x => x.TargetId);
+        });
+
+        b.Entity<LegalTaskLink>(e =>
+        {
+            e.ToTable("LegalTaskLinks");
+            e.HasOne<LegalDocument>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(x => new { x.DocumentId, x.TaskId }).IsUnique();
+            e.HasIndex(x => x.TaskId);
         });
 
         b.Entity<AppNotification>(e =>

@@ -210,6 +210,231 @@ namespace EEMC.WM.Data.Migrations
                     b.ToTable("CodeCounters", (string)null);
                 });
 
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalDocument", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DocType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Effect")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("EffectCheckedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("EffectiveDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ExpiryDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FullText")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("IssuedDate")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Issuer")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SearchText")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StoredFile")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryAbout")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryApplies")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("SummaryApprovedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryApprovedBy")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SummaryAuthor")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SummaryState")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SummaryUpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tags")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Effect");
+
+                    b.HasIndex("Number");
+
+                    b.ToTable("LegalDocuments", (string)null);
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalPoint", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Citation")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Due")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "Kind", "SortOrder");
+
+                    b.ToTable("LegalPoints", (string)null);
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalRelation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("TargetText")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId");
+
+                    b.HasIndex("TargetId");
+
+                    b.ToTable("LegalRelations", (string)null);
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalSection", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Heading")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "SortOrder");
+
+                    b.ToTable("LegalSections", (string)null);
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalTaskLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("DocumentId", "TaskId")
+                        .IsUnique();
+
+                    b.ToTable("LegalTaskLinks", (string)null);
+                });
+
             modelBuilder.Entity("EEMC.WM.Core.Domain.Milestone", b =>
                 {
                     b.Property<int>("Id")
@@ -626,6 +851,47 @@ namespace EEMC.WM.Data.Migrations
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalPoint", b =>
+                {
+                    b.HasOne("EEMC.WM.Core.Domain.LegalDocument", null)
+                        .WithMany("Points")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalRelation", b =>
+                {
+                    b.HasOne("EEMC.WM.Core.Domain.LegalDocument", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("EEMC.WM.Core.Domain.LegalDocument", null)
+                        .WithMany()
+                        .HasForeignKey("TargetId")
+                        .OnDelete(DeleteBehavior.SetNull);
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalSection", b =>
+                {
+                    b.HasOne("EEMC.WM.Core.Domain.LegalDocument", null)
+                        .WithMany("Sections")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalTaskLink", b =>
+                {
+                    b.HasOne("EEMC.WM.Core.Domain.LegalDocument", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("EEMC.WM.Core.Domain.Milestone", b =>
                 {
                     b.HasOne("EEMC.WM.Core.Domain.Project", null)
@@ -657,6 +923,13 @@ namespace EEMC.WM.Data.Migrations
                     b.Navigation("Parent");
 
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("EEMC.WM.Core.Domain.LegalDocument", b =>
+                {
+                    b.Navigation("Points");
+
+                    b.Navigation("Sections");
                 });
 
             modelBuilder.Entity("EEMC.WM.Core.Domain.Project", b =>

@@ -1,0 +1,26 @@
+@* Một văn bản trong sơ đồ quan hệ *@
+<div class="box">
+    <div class="tertiary small">@Caption</div>
+    @if (View.OtherId.HasValue)
+    {
+        <a href="/legal/@View.OtherId">@View.OtherName</a>
+        @if (View.OtherEffect.HasValue) { <span class="badge b-@Ui.EffectColor(View.OtherEffect.Value)" style="margin-left:4px">@Labels.Of(View.OtherEffect.Value)</span> }
+    }
+    else
+    {
+        <span>@View.OtherName</span> <span class="tertiary small">(chưa có trong thư viện)</span>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public LegalRelationView View { get; set; } = default!;
+
+    private string Caption => (View.Relation.Kind, View.Incoming) switch
+    {
+        (LegalRelationKind.BasedOn, false) => "Căn cứ ban hành",
+        (LegalRelationKind.Guides, false) => "Được văn bản đang xem hướng dẫn",
+        (LegalRelationKind.BasedOn, true) => "Ban hành căn cứ văn bản đang xem",
+        (LegalRelationKind.Guides, true) => "Hướng dẫn thi hành",
+        _ => Labels.Of(View.Relation.Kind)
+    };
+}

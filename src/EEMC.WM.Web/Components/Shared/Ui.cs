@@ -48,6 +48,22 @@ public static class Ui
         _ => "gray"
     };
 
+    public static string EffectColor(LegalEffect e) => e switch
+    {
+        LegalEffect.InEffect => "green",
+        LegalEffect.PartlyExpired => "orange",
+        LegalEffect.Expired => "red",
+        LegalEffect.NotYetEffective => "blue",
+        _ => "gray"
+    };
+
+    public static string SummaryColor(SummaryState s) => s switch
+    {
+        SummaryState.Approved => "green",
+        SummaryState.Draft => "orange",
+        _ => "gray"
+    };
+
     /// <summary>Giá trị CSS luôn dùng dấu chấm thập phân (văn hóa vi-VN dùng dấu phẩy làm hỏng CSS).</summary>
     public static string Px(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "px";
     public static string Pc(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";

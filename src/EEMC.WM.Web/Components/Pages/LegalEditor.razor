@@ -1,0 +1,288 @@
+@page "/legal/new"
+@page "/legal/{Id:int}/edit"
+@implements IDisposable
+@inject LegalService Legal
+@inject UiService UiSvc
+@inject NavigationManager Nav
+
+<PageTitle>@(Id == 0 ? "Thêm văn bản" : "Sửa văn bản") – KHCN&amp;CĐS EEMC</PageTitle>
+
+<div class="page-head">
+    <div style="flex:1 1 320px;min-width:0">
+        <div class="muted"><a href="/legal">Văn bản pháp luật</a>@(Id == 0 ? "" : " › " + (_m.Number ?? _m.Title))</div>
+        <h1>@(Id == 0 ? "Thêm văn bản pháp luật" : "Sửa văn bản")</h1>
+        <div class="muted">Nhập một lần; mục lục toàn văn và đồ họa được dựng từ dữ liệu này. Bản rút gọn lập ở trang văn bản sau khi lưu.</div>
+    </div>
+</div>
+
+@if (_notFound)
+{
+    <div class="card">Không tìm thấy văn bản. <a href="/legal">Về thư viện</a></div>
+}
+else
+{
+    <div class="grid grid-2" style="align-items:start">
+        <div>
+            <div class="card mb">
+                <h2>1. Nguồn văn bản</h2>
+                <div class="muted mb-s">Tải tệp PDF có lớp chữ, DOCX hoặc TXT (tối đa @(AttachmentService.MaxBytes / 1024 / 1024) MB) để trích toàn văn, hoặc dán toàn văn từ nguồn chính thức. PDF bản quét cần dán toàn văn.</div>
+                <div class="row mb-s">
+                    <label class="btn" style="cursor:pointer">
+                        <Icon Name="upload" Class="sm" />@(_m.StoredFile == null ? "Chọn tệp" : "Thay tệp")
+                        <InputFile OnChange="UploadAsync" accept=".pdf,.docx,.txt" style="display:none" />
+                    </label>
+                    @if (_busy) { <span class="muted">Đang đọc tệp...</span> }
+                    @if (_m.StoredFile != null)
+                    {
+                        <span><Icon Name="file" Class="sm" /> @_m.FileName <span class="tertiary small">@AttachmentService.SizeText(_m.FileSize)</span></span>
+                        <button class="btn sm ghost danger" @onclick="RemoveFile">Bỏ tệp</button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_warning)) { <div class="banner warn small">@_warning</div> }
+                <label class="field">
+                    <span>Toàn văn</span>
+                    <textarea class="input" rows="16" style="font-size:13px" placeholder="Dán toàn văn văn bản vào đây (giữ nguyên các dòng Chương, Mục, Điều)..." @bind="_m.FullText" @bind:after="OnTextChanged"></textarea>
+                </label>
+                <div class="row small">
+                    <span class="muted spacer">@_parseInfo</span>
+                    <button class="btn sm ghost" @onclick="() => FillFromHeader(true)" title="Đọc số hiệu, loại văn bản và ngày ban hành ghi ở đầu toàn văn">Đọc thông tin từ đầu văn bản</button>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card mb">
+                <h2>2. Thông tin văn bản</h2>
+                <label class="field"><span>Tên văn bản (trích yếu) *</span><textarea class="input" rows="2" @bind="_m.Title"></textarea></label>
+                <div class="grid grid-2">
+                    <label class="field"><span>Loại văn bản</span>
+                        <select class="input" @bind="_m.DocType">@foreach (var t in Enum.GetValues<LegalDocType>()) { <option value="@t">@Labels.Of(t)</option> }</select>
+                    </label>
+                    <label class="field"><span>Số hiệu</span><input class="input" placeholder="Ví dụ: 13/2019/NĐ-CP" @bind="_m.Number" /></label>
+                    <label class="field"><span>Cơ quan ban hành</span>
+                        <input class="input" list="issuers" @bind="_m.Issuer" />
+                        <datalist id="issuers">@foreach (var i in Issuers) { <option value="@i"></option> }</datalist>
+                    </label>
+                    <label class="field"><span>Lĩnh vực / nhãn (phân cách bằng dấu phẩy)</span><input class="input" placeholder="KH&CN, Chuyển đổi số..." @bind="_m.Tags" /></label>
+                    <label class="field"><span>Ngày ban hành</span><input type="date" class="input" value="@Ui.ToDateInput(_m.IssuedDate)" @onchange="e => _m.IssuedDate = Ui.FromInput(e.Value?.ToString())" /></label>
+                    <label class="field"><span>Ngày có hiệu lực</span><input type="date" class="input" value="@Ui.ToDateInput(_m.EffectiveDate)" @onchange="e => _m.EffectiveDate = Ui.FromInput(e.Value?.ToString())" /></label>
+                    <label class="field"><span>Tình trạng hiệu lực</span>
+                        <select class="input" @bind="_m.Effect">@foreach (var e in Enum.GetValues<LegalEffect>()) { <option value="@e">@Labels.Of(e)</option> }</select>
+                    </label>
+                    <label class="field"><span>Ngày hết hiệu lực (nếu có)</span><input type="date" class="input" value="@Ui.ToDateInput(_m.ExpiryDate)" @onchange="e => _m.ExpiryDate = Ui.FromInput(e.Value?.ToString())" /></label>
+                </div>
+                <label class="field"><span>Đường dẫn nguồn chính thức</span><input class="input" placeholder="https://..." @bind="_m.SourceUrl" /></label>
+                <div class="muted small">Tình trạng hiệu lực ghi theo nguồn chính thức tại thời điểm nhập; phần mềm lưu kèm ngày kiểm tra.</div>
+            </div>
+
+            <div class="card mb" id="relations">
+                <h2>3. Quan hệ với văn bản khác</h2>
+                <div class="muted mb-s">Văn bản này [quan hệ] văn bản đích. Chọn văn bản có trong thư viện hoặc gõ tên văn bản chưa nhập.</div>
+                <div class="row mb-s nowrap">
+                    <select class="input" style="width:auto" @bind="_relKind">
+                        @foreach (var k in Enum.GetValues<LegalRelationKind>()) { <option value="@k">@Labels.Of(k)</option> }
+                    </select>
+                    <input class="input" style="flex:1" list="library" placeholder="Tìm văn bản trong thư viện hoặc gõ tên..." @bind="_relTarget" />
+                    <datalist id="library">@foreach (var d in _library.Where(d => d.Id != Id)) { <option value="@d.ShortName"></option> }</datalist>
+                    <button class="btn" @onclick="AddRelationAsync">Thêm</button>
+                </div>
+                @if (_relations.Count == 0 && _pending.Count == 0) { <div class="empty">Chưa có quan hệ.</div> }
+                @foreach (var r in _relations.Where(r => !r.Incoming))
+                {
+                    var rel = r;
+                    <div class="timeline-item">
+                        <span class="badge b-gray">@Labels.Of(r.Relation.Kind)</span>
+                        <span class="spacer">@r.OtherName</span>
+                        <button class="btn sm ghost danger icon-only" title="Xóa quan hệ" @onclick="() => DeleteRelationAsync(rel)"><Icon Name="trash" Class="sm" /></button>
+                    </div>
+                }
+                @foreach (var p in _pending)
+                {
+                    var pr = p;
+                    <div class="timeline-item">
+                        <span class="badge b-gray">@Labels.Of(p.Kind)</span>
+                        <span class="spacer">@p.Name <span class="tertiary small">(lưu cùng văn bản)</span></span>
+                        <button class="btn sm ghost danger icon-only" title="Bỏ" @onclick="() => _pending.Remove(pr)"><Icon Name="trash" Class="sm" /></button>
+                    </div>
+                }
+                @if (_relations.Any(r => r.Incoming))
+                {
+                    <div class="muted small mt-s">Văn bản khác trỏ tới văn bản này: @string.Join("; ", _relations.Where(r => r.Incoming).Select(r => $"{r.OtherName} ({Labels.Of(r.Relation.Kind).ToLowerInvariant()})")) — sửa ở văn bản tương ứng.</div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error)) { <div class="validation mb">@_error</div> }
+    <div class="row">
+        <span class="spacer"></span>
+        <button class="btn" @onclick="CancelAsync">Hủy</button>
+        <button class="btn primary" disabled="@_busy" @onclick="SaveAsync">Lưu văn bản</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private static readonly string[] Issuers =
+    {
+        "Quốc hội", "Ủy ban Thường vụ Quốc hội", "Chính phủ", "Thủ tướng Chính phủ", "Bộ Khoa học và Công nghệ", "Bộ Công Thương",
+        "Bộ Tài chính", "Tập đoàn Điện lực Việt Nam", "Tổng công ty Thiết bị điện Đông Anh"
+    };
+
+    private sealed record PendingRelation(LegalRelationKind Kind, int? TargetId, string? Text, string Name);
+
+    private LegalDocument _m = new();
+    private List<LegalDocument> _library = new();
+    private List<LegalRelationView> _relations = new();
+    private readonly List<PendingRelation> _pending = new();
+    private LegalRelationKind _relKind = LegalRelationKind.BasedOn;
+    private string _relTarget = "", _parseInfo = "";
+    private string? _error, _warning, _uploadedNotSaved, _originalFile;
+    private bool _busy, _notFound, _saved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _library = await Legal.SearchAsync();
+        if (Id != 0)
+        {
+            var d = await Legal.GetAsync(Id);
+            if (d == null) { _notFound = true; return; }
+            _m = d;
+            _originalFile = d.StoredFile;
+            _relations = await Legal.GetRelationsAsync(Id);
+        }
+        Reparse();
+    }
+
+    /// <summary>Dán toàn văn: tách lại mục lục và điền sẵn các ô thông tin còn trống từ phần đầu văn bản.</summary>
+    private void OnTextChanged()
+    {
+        Reparse();
+        FillFromHeader(false);
+    }
+
+    private void Reparse()
+    {
+        var sections = LegalTextParser.Parse(_m.FullText);
+        int chapters = sections.Count(s => s.Kind == LegalSectionKind.Chapter), articles = sections.Count(s => s.Kind == LegalSectionKind.Article);
+        _parseInfo = string.IsNullOrWhiteSpace(_m.FullText) ? "Chưa có toàn văn."
+            : articles == 0 ? "Chưa nhận ra Điều nào: kiểm tra mỗi điều bắt đầu một dòng dạng \"Điều 1. ...\"."
+            : $"Tách được {chapters} chương, {articles} điều.";
+    }
+
+    /// <summary>Điền số hiệu, loại, ngày ban hành đọc được ở đầu toàn văn (chỉ điền ô còn trống trừ khi người dùng bấm nút).</summary>
+    private void FillFromHeader(bool manual)
+    {
+        var (number, type, issued) = LegalTextParser.ReadHeader(_m.FullText);
+        var filled = new List<string>();
+        if (number != null && (manual || string.IsNullOrWhiteSpace(_m.Number))) { _m.Number = number; filled.Add("số hiệu"); }
+        if (type != null && (manual || _m.DocType == LegalDocType.Other)) { _m.DocType = type.Value; filled.Add("loại văn bản"); }
+        if (issued != null && (manual || _m.IssuedDate == null)) { _m.IssuedDate = issued; filled.Add("ngày ban hành"); }
+        if (filled.Count > 0) UiSvc.Show($"Đã điền {string.Join(", ", filled)} theo phần đầu văn bản — hãy kiểm tra lại.");
+        else if (manual) UiSvc.Show("Không đọc được số hiệu, loại hoặc ngày ban hành ở đầu toàn văn.");
+    }
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        var f = e.File;
+        if (f.Size > AttachmentService.MaxBytes) { UiSvc.Error($"Tệp vượt quá {AttachmentService.MaxBytes / 1024 / 1024} MB."); return; }
+        _busy = true;
+        _warning = null;
+        try
+        {
+            await using var s = f.OpenReadStream(AttachmentService.MaxBytes);
+            var r = await Legal.StoreFileAsync(s, f.Name, f.Size);
+            if (_uploadedNotSaved != null) await Legal.DiscardFileAsync(_uploadedNotSaved);
+            _uploadedNotSaved = r.StoredFile;
+            _m.StoredFile = r.StoredFile;
+            _m.FileName = r.FileName;
+            _m.FileSize = r.Size;
+            _warning = r.Warning;
+            if (r.Text != null)
+            {
+                bool replace = string.IsNullOrWhiteSpace(_m.FullText) ||
+                               await UiSvc.ConfirmAsync("Thay toàn văn hiện có bằng nội dung trích từ tệp mới?", "Thay");
+                if (replace)
+                {
+                    _m.FullText = r.Text;
+                    Reparse();
+                    FillFromHeader(false);
+                }
+            }
+            if (string.IsNullOrWhiteSpace(_m.Title)) _m.Title = Path.GetFileNameWithoutExtension(r.FileName);
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không tải được tệp"); }
+        finally { _busy = false; }
+    }
+
+    private void RemoveFile()
+    {
+        _m.StoredFile = null;
+        _m.FileName = null;
+        _m.FileSize = 0;
+        _warning = null;
+    }
+
+    private async Task AddRelationAsync()
+    {
+        var text = _relTarget.Trim();
+        if (text.Length == 0) { UiSvc.Show("Chọn hoặc gõ tên văn bản đích."); return; }
+        var target = _library.FirstOrDefault(d => d.ShortName == text);
+        if (target?.Id == Id && Id != 0) { UiSvc.Show("Văn bản không thể có quan hệ với chính nó."); return; }
+        try
+        {
+            if (Id == 0) _pending.Add(new PendingRelation(_relKind, target?.Id, target == null ? text : null, target?.ShortName ?? text));
+            else
+            {
+                await Legal.AddRelationAsync(Id, _relKind, target?.Id, target == null ? text : null);
+                _relations = await Legal.GetRelationsAsync(Id);
+            }
+            _relTarget = "";
+        }
+        catch (Exception ex) { UiSvc.Error(ex, "Không thêm được quan hệ"); }
+    }
+
+    private async Task DeleteRelationAsync(LegalRelationView r)
+    {
+        await Legal.DeleteRelationAsync(r.Relation.Id);
+        _relations = await Legal.GetRelationsAsync(Id);
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            var saved = await Legal.SaveAsync(_m);
+            _saved = true;
+            foreach (var p in _pending)
+            {
+                try { await Legal.AddRelationAsync(saved.Id, p.Kind, p.TargetId, p.Text); }
+                catch (Exception ex) { UiSvc.Error(ex, "Không lưu được một quan hệ"); }
+            }
+            UiSvc.Success("Đã lưu văn bản.");
+            Nav.NavigateTo($"/legal/{saved.Id}");
+        }
+        catch (ValidationException ex) { _error = string.Join("\n", ex.Errors); }
+        catch (Exception ex) { UiSvc.Error(ex, "Không lưu được văn bản"); }
+        finally { _busy = false; }
+    }
+
+    private async Task CancelAsync()
+    {
+        await DiscardUnsavedAsync();
+        Nav.NavigateTo(Id == 0 ? "/legal" : $"/legal/{Id}");
+    }
+
+    private async Task DiscardUnsavedAsync()
+    {
+        if (_saved || _uploadedNotSaved == null || _uploadedNotSaved == _originalFile) return;
+        var f = _uploadedNotSaved;
+        _uploadedNotSaved = null;
+        await Legal.DiscardFileAsync(f);
+    }
+
+    public void Dispose() => _ = DiscardUnsavedAsync();
+}

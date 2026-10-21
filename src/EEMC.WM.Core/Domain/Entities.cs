@@ -302,6 +302,157 @@ public class SyncTombstone
     public bool SyncDirty { get; set; }
 }
 
+// ============================ VĂN BẢN PHÁP LUẬT ============================
+
+public enum LegalDocType
+{
+    Law = 1,             // Luật, Bộ luật
+    Resolution = 2,      // Nghị quyết
+    Decree = 3,          // Nghị định
+    Decision = 4,        // Quyết định
+    Circular = 5,        // Thông tư
+    Internal = 6,        // Quy chế, quy định nội bộ
+    Standard = 7,        // Tiêu chuẩn, quy chuẩn
+    Other = 9
+}
+
+/// <summary>Tình trạng hiệu lực do người nhập ghi theo nguồn chính thức; phần mềm không tự khẳng định.</summary>
+public enum LegalEffect
+{
+    Unknown = 0,          // Chưa xác định
+    InEffect = 1,         // Còn hiệu lực
+    PartlyExpired = 2,    // Hết hiệu lực một phần
+    Expired = 3,          // Hết hiệu lực
+    NotYetEffective = 4   // Chưa có hiệu lực
+}
+
+public enum SummaryState
+{
+    None = 0,      // Chưa lập
+    Draft = 1,     // Chưa duyệt
+    Approved = 2   // Đã duyệt
+}
+
+/// <summary>Văn bản pháp luật hoặc quy chế nội bộ: toàn văn, bản rút gọn có duyệt, quan hệ với văn bản khác.</summary>
+public class LegalDocument
+{
+    public int Id { get; set; }
+    /// <summary>Số hiệu văn bản.</summary>
+    public string? Number { get; set; }
+    /// <summary>Tên/trích yếu.</summary>
+    public string Title { get; set; } = "";
+    public LegalDocType DocType { get; set; } = LegalDocType.Other;
+    public string? Issuer { get; set; }
+    public DateTime? IssuedDate { get; set; }
+    public DateTime? EffectiveDate { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public LegalEffect Effect { get; set; }
+    /// <summary>Ngày người dùng kiểm tra tình trạng hiệu lực gần nhất.</summary>
+    public DateTime? EffectCheckedAt { get; set; }
+    /// <summary>Lĩnh vực/nhãn, phân cách bằng dấu phẩy.</summary>
+    public string? Tags { get; set; }
+    public string? SourceUrl { get; set; }
+    /// <summary>Tệp gốc lưu trong thư mục dữ liệu (files\legal\...).</summary>
+    public string? StoredFile { get; set; }
+    public string? FileName { get; set; }
+    public long FileSize { get; set; }
+    /// <summary>Toàn văn (văn bản thuần) dùng để tách mục lục và tìm kiếm.</summary>
+    public string? FullText { get; set; }
+
+    // ---- Bản rút gọn ----
+    /// <summary>Văn bản nói về gì.</summary>
+    public string? SummaryAbout { get; set; }
+    /// <summary>Áp dụng với EEMC như thế nào.</summary>
+    public string? SummaryApplies { get; set; }
+    public SummaryState SummaryState { get; set; }
+    public string? SummaryAuthor { get; set; }
+    public DateTime? SummaryUpdatedAt { get; set; }
+    public string? SummaryApprovedBy { get; set; }
+    public DateTime? SummaryApprovedAt { get; set; }
+
+    public string SearchText { get; set; } = "";
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+
+    public List<LegalSection> Sections { get; set; } = new();
+    public List<LegalPoint> Points { get; set; } = new();
+
+    public string ShortName => string.IsNullOrWhiteSpace(Number) ? Title : $"{Number} – {Title}";
+}
+
+public enum LegalSectionKind
+{
+    Preamble = 0,   // Phần mở đầu, căn cứ ban hành
+    Part = 1,       // Phần
+    Chapter = 2,    // Chương
+    Section = 3,    // Mục
+    Article = 4     // Điều
+}
+
+/// <summary>Một mục trong mục lục toàn văn (tách tự động từ toàn văn).</summary>
+public class LegalSection
+{
+    public int Id { get; set; }
+    public int DocumentId { get; set; }
+    public LegalSectionKind Kind { get; set; }
+    /// <summary>Số thứ tự như trong văn bản: "I", "2", "5a".</summary>
+    public string Number { get; set; } = "";
+    public string Heading { get; set; } = "";
+    public string Body { get; set; } = "";
+    public int SortOrder { get; set; }
+}
+
+public enum LegalPointKind
+{
+    KeyPoint = 1,   // Điểm chính cần biết
+    Duty = 2,       // Việc EEMC cần làm
+    Step = 3        // Bước trong trình tự thủ tục
+}
+
+/// <summary>Một ý của bản rút gọn, luôn kèm điều khoản căn cứ.</summary>
+public class LegalPoint
+{
+    public int Id { get; set; }
+    public int DocumentId { get; set; }
+    public LegalPointKind Kind { get; set; }
+    public string Text { get; set; } = "";
+    /// <summary>Căn cứ: "Điều 5, khoản 1".</summary>
+    public string? Citation { get; set; }
+    /// <summary>Thời hạn (văn bản tự do, theo quy định của văn bản).</summary>
+    public string? Due { get; set; }
+    /// <summary>Công việc đã tạo từ việc cần làm này.</summary>
+    public int? TaskId { get; set; }
+    public int SortOrder { get; set; }
+}
+
+public enum LegalRelationKind
+{
+    BasedOn = 1,    // Căn cứ
+    Guides = 2,     // Hướng dẫn thi hành
+    Amends = 3,     // Sửa đổi, bổ sung
+    Replaces = 4,   // Thay thế
+    Repeals = 5     // Bãi bỏ
+}
+
+/// <summary>Văn bản <see cref="DocumentId"/> [Kind] văn bản đích (trong thư viện hoặc chỉ ghi tên).</summary>
+public class LegalRelation
+{
+    public int Id { get; set; }
+    public int DocumentId { get; set; }
+    public LegalRelationKind Kind { get; set; }
+    public int? TargetId { get; set; }
+    /// <summary>Tên văn bản đích khi chưa có trong thư viện.</summary>
+    public string? TargetText { get; set; }
+}
+
+/// <summary>Công việc liên quan đến văn bản.</summary>
+public class LegalTaskLink
+{
+    public int Id { get; set; }
+    public int DocumentId { get; set; }
+    public int TaskId { get; set; }
+}
+
 /// <summary>Tệp thay đổi cuối cùng đã nhận từ từng máy khác.</summary>
 public class SyncSourceState
 {

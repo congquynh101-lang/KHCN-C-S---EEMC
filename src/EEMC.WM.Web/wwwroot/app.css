@@ -266,6 +266,63 @@ details.ext[open] > summary { border-bottom-left-radius: 0; border-bottom-right-
 details.ext > .ext-body { border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px; padding: 6px 14px 14px; background: var(--card); }
 .timeline-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 
+/* ===== Văn bản pháp luật ===== */
+.legal-shell { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+.legal-list { display: flex; flex-direction: column; gap: 8px; }
+.legal-item { text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font: inherit; color: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.legal-item:hover { background: var(--hover); }
+.legal-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.legal-item .t { font-weight: 600; }
+.legal-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 16px; font-size: 13px; }
+.legal-meta b { display: block; }
+.legal-full { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; align-items: start; }
+.toc { position: sticky; top: 12px; max-height: calc(100vh - 120px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.toc button { text-align: left; border: 0; background: transparent; color: var(--fg); border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; cursor: pointer; }
+.toc button:hover { background: var(--hover); }
+.toc .grp { font-size: 12px; font-weight: 600; color: var(--fg2); padding-top: 8px; }
+.law-text h3 { font-size: 15px; text-align: center; margin: 18px 0 8px; }
+.law-text h4 { font-size: 14.5px; margin: 16px 0 6px; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.law-text h4 .spacer { min-width: 8px; }
+.law-text p { margin: 0 0 5px; line-height: 1.6; }
+.law-text .i1 { padding-left: 0; }
+.law-text .i2 { padding-left: 22px; }
+.law-text .i3 { padding-left: 40px; }
+.law-text .flash { background: var(--orange-soft); border-radius: 6px; }
+.cite { display: inline-block; border: 0; font: inherit; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 7px; cursor: pointer; white-space: nowrap; }
+.num { flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; display: grid; place-items: center; }
+.num.sq { border-radius: 6px; background: var(--accent-soft); color: var(--accent); width: 28px; height: 28px; }
+.banner { border-radius: var(--radius); padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 12px; }
+.banner.warn { background: var(--orange-soft); color: var(--orange); }
+.banner.info { background: var(--gray-soft); }
+.banner.ok { background: var(--green-soft); }
+.efftl { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(130px, 1fr); overflow-x: auto; padding-bottom: 4px; }
+.efftl .st { display: flex; flex-direction: column; gap: 4px; padding-right: 10px; }
+.efftl .ln { display: flex; align-items: center; }
+.efftl .dot { width: 16px; height: 16px; border-radius: 50%; flex: none; }
+.efftl .bar { flex: 1; height: 3px; background: var(--border2); }
+.efftl .past .dot { background: var(--accent); }
+.efftl .past .bar { background: var(--accent); }
+.efftl .future .dot { background: var(--card); border: 2px solid var(--accent); }
+.efftl .unknown .dot { background: var(--card); border: 2px dashed var(--fg3); }
+.efftl .amend .dot { background: var(--orange); }
+.efftl .end .dot { background: var(--red); }
+.reldia { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1.1fr) 28px minmax(0, 1fr); gap: 8px; align-items: center; }
+.reldia .col { display: flex; flex-direction: column; gap: 8px; }
+.reldia .box { border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.reldia .me { border: 2px solid var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 12px; text-align: center; }
+.reldia .arrow { text-align: center; color: var(--fg3); font-size: 20px; }
+.relchip { border: 1px dashed var(--border2); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.relchip.warn { border-color: var(--orange); color: var(--orange); }
+.sbar { height: 10px; background: var(--gray-soft); border-radius: 5px; }
+.sbar > div { height: 10px; background: var(--accent); border-radius: 5px; }
+@media (max-width: 1100px) {
+    .legal-shell, .legal-full { grid-template-columns: 1fr; }
+    .toc { position: static; max-height: 260px; }
+    .legal-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .reldia { grid-template-columns: 1fr; }
+    .reldia .arrow { transform: rotate(90deg); }
+}
+
 /* ===== Trang đăng nhập ===== */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 16px; background: linear-gradient(135deg, var(--bg), var(--accent-soft)); }
 .auth .card { width: min(400px, 100%); padding: 28px; box-shadow: var(--shadow); }

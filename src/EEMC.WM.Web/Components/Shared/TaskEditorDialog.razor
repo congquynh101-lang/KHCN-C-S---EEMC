@@ -152,6 +152,7 @@
     private string? _error, _assessment, _suggestion;
     private List<Category> _categories = new();
     private List<Project> _projects = new();
+    private Func<WorkTask, Task>? _onCreated;
 
     protected override void OnInitialized() => UiSvc.EditorRequested += OnRequested;
 
@@ -160,6 +161,7 @@
     private async Task OpenAsync(EditorRequest r)
     {
         _error = null;
+        _onCreated = r.TaskId.HasValue ? null : r.OnCreated;
         _categories = await Categories.GetAllAsync();
         _projects = await Projects.GetActiveListAsync();
         if (r.TaskId is int id)
@@ -180,7 +182,7 @@
         else
         {
             _original = new WorkTask();
-            _m = new WorkTask { Priority = TaskPriority.Normal, Weight = 1 };
+            _m = new WorkTask { Priority = TaskPriority.Normal, Weight = 1, Title = r.Title ?? "", Notes = r.Notes };
             _isNew = true;
             _code = "";
             _received = Clock.Now;
@@ -292,6 +294,8 @@
             else saved = await Tasks.UpdateAsync(t);
             UiSvc.Success(_isNew ? $"Đã thêm {saved.Code}" : $"Đã cập nhật {saved.Code}");
             _open = false;
+            if (_isNew && _onCreated != null) await _onCreated(saved);
+            _onCreated = null;
         }
         catch (ValidationException ex) { _error = string.Join("\n", ex.Errors); }
         catch (Exception ex) { UiSvc.Error(ex, "Không lưu được công việc"); }

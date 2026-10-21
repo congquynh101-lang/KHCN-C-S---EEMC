@@ -76,8 +76,9 @@ public enum ToastKind { Info, Success, Warning, Error }
 
 public sealed record Toast(Guid Id, string Message, ToastKind Kind);
 
-/// <summary>Yêu cầu mở cửa sổ thêm/sửa công việc.</summary>
-public sealed record EditorRequest(int? TaskId, DateTime? DueDate = null, int? ProjectId = null, int? ParentId = null);
+/// <summary>Yêu cầu mở cửa sổ thêm/sửa công việc. Title/Notes điền sẵn cho công việc mới; OnCreated gọi sau khi tạo xong.</summary>
+public sealed record EditorRequest(int? TaskId, DateTime? DueDate = null, int? ProjectId = null, int? ParentId = null,
+    string? Title = null, string? Notes = null, Func<WorkTask, Task>? OnCreated = null);
 
 /// <summary>Thông báo nhanh, hộp xác nhận và tải tệp cho từng phiên trình duyệt.</summary>
 public sealed class UiService
